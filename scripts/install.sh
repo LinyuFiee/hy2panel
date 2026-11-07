@@ -85,6 +85,7 @@ install -o root -g root -m 755 "${WORK_DIR}/sing-box-${SING_BOX_VERSION}-linux-a
 install -o root -g root -m 755 "${WORK_DIR}/librespeed-cli" /usr/local/bin/librespeed-cli
 install -o root -g root -m 750 "${ROOT_DIR}/scripts/hy2panel-apply.sh" /usr/local/sbin/hy2panel-apply
 install -o root -g root -m 750 "${ROOT_DIR}/scripts/hy2panel-bbr.sh" /usr/local/sbin/hy2panel-bbr
+install -o root -g root -m 750 "${ROOT_DIR}/scripts/hy2panel-watchdog.sh" /usr/local/sbin/hy2panel-watchdog
 install -o root -g root -m 750 "${ROOT_DIR}/scripts/cert-deploy.sh" /usr/local/sbin/hy2panel-cert-deploy
 install -o root -g root -m 644 "${ROOT_DIR}/scripts/99-hy2panel.conf" /etc/hy2panel/99-hy2panel.conf
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel.service" /etc/systemd/system/hy2panel.service
@@ -93,6 +94,8 @@ install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-apply.service" /etc
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-apply.path" /etc/systemd/system/hy2panel-apply.path
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-bbr.service" /etc/systemd/system/hy2panel-bbr.service
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-bbr.path" /etc/systemd/system/hy2panel-bbr.path
+install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-watchdog.service" /etc/systemd/system/hy2panel-watchdog.service
+install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-watchdog.timer" /etc/systemd/system/hy2panel-watchdog.timer
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-firewall.service" /etc/systemd/system/hy2panel-firewall.service
 install -D -o root -g root -m 750 "${ROOT_DIR}/scripts/cert-deploy.sh" /etc/letsencrypt/renewal-hooks/deploy/hy2panel
 
@@ -170,10 +173,11 @@ fi
 chmod 600 /etc/hy2panel/firewall.nft
 
 systemctl daemon-reload
-systemctl enable certbot.timer hy2panel-apply.path hy2panel-bbr.path hy2panel-firewall.service hy2panel.service sing-box.service
+systemctl enable certbot.timer hy2panel-apply.path hy2panel-bbr.path hy2panel-watchdog.timer hy2panel-firewall.service hy2panel.service sing-box.service
 systemctl start hy2panel-firewall.service
 systemctl start hy2panel-apply.path
 systemctl start hy2panel-bbr.path
+systemctl start hy2panel-watchdog.timer
 if ! /usr/local/sbin/hy2panel-apply; then
   printf 'sing-box 首次启动失败: %s\n' "$(< /etc/hy2panel/apply.result)" >&2
   exit 1

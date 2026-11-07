@@ -1,0 +1,11 @@
+[Unit]
+Description=Check sing-box listeners and recover failures
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-watchdog
+TimeoutStartSec=50s
+PrivateTmp=true
+ProtectHome=true

@@ -15,6 +15,9 @@ test('dashboard renders metrics and Hairline without runtime errors', async ({ p
   await expect(page.getByText('已启用', { exact: true })).toBeVisible()
   await expect(page.locator('.hairline-figure svg')).toBeVisible()
   await expect(page.locator('.download-line')).toHaveAttribute('d', /L/)
+  await expect(page.locator('.sidebar-brand .logo-image')).toHaveAttribute('src', '/logo.png')
+  expect(await page.locator('.sidebar-brand .logo-image').evaluate(image => image.naturalWidth > 0)).toBe(true)
+  expect((await page.request.get('/logo.png')).status()).toBe(200)
   await page.screenshot({ path: '../docs/images/dashboard.png', fullPage: true })
   expect(errors).toEqual([])
 })
@@ -44,6 +47,20 @@ test('speed test can start and finish', async ({ page }) => {
   await page.getByRole('button', { name: '开始测速', exact: true }).click()
   await expect(page.getByRole('button', { name: '测速进行中…' })).toBeDisabled()
   await expect(page.getByRole('button', { name: '开始测速', exact: true })).toBeEnabled({ timeout: 10000 })
+})
+
+test('maintenance shows diagnostics, logs and recovery controls', async ({ page }) => {
+  await openDashboard(page)
+  await page.getByRole('button', { name: '日志与自检', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '服务端问题自检' })).toBeVisible()
+  await expect(page.locator('.log-line')).toHaveCount(3)
+  await page.getByRole('button', { name: '开始自检', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '检查结果与修复建议' })).toBeVisible()
+  await expect(page.getByText('sing-box.service 正在运行')).toBeVisible()
+  const recoveryToggle = page.locator('.recovery-row .toggle input')
+  await recoveryToggle.check()
+  await expect(recoveryToggle).toBeChecked()
+  await page.screenshot({ path: '../docs/images/maintenance.png', fullPage: true })
 })
 
 test('mobile layout does not overflow horizontally', async ({ page }) => {

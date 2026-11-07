@@ -13,6 +13,8 @@
 - LibreSpeed 按需测速，展示延迟、抖动、上下行和测试耗流
 - Hairline 指针互动图形、浅色响应式界面
 - 节点配置预检、原子应用和启动失败回滚
+- 固定单元日志查看、凭据脱敏和逐项服务端自检
+- systemd 自动重启、每分钟监听检查及保守自动换端口
 - HTTPS、管理 IP 白名单、登录限流、HttpOnly/SameSite Strict 会话
 - 面板与 sing-box 非 root 运行，仅固定系统操作通过受控 root 单元执行
 
@@ -69,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新 Release。固定版本：
 
 ```bash
-export HY2PANEL_VERSION="v0.2.0"
+export HY2PANEL_VERSION="v0.3.0"
 ```
 
 ## RackNerd 流量配置
@@ -94,6 +96,23 @@ API 请求失败时，错误信息仅显示在管理面板。成功结果缓存 
 「系统设置」中的 BBR 按钮只应用项目内置的 `/etc/hy2panel/99-hy2panel.conf` 模板，不接收任意 sysctl 参数。BBR 主要优化 Reality 的 TCP 连接；Hysteria2 使用 QUIC 自有拥塞控制。
 
 测速使用 LibreSpeed CLI，默认 3 并发、下载和上传各 8 秒、禁用 ICMP、使用 HTTPS。只有点击「开始测速」才会运行，不会后台定时测速。测速会短暂占用网络并消耗套餐流量。
+
+## 日志、自检与自动恢复
+
+「日志与自检」页面提供：
+
+- 配置语法、核心服务、TCP/UDP 实际监听、证书有效期、DNS、Reality 握手目标、BBR 和系统资源检查
+- 每项异常对应的修复建议
+- sing-box、面板、看门狗和配置应用日志，固定单元、固定行数并在返回前脱敏
+- 进程退出时由 systemd 自动重启，看门狗每分钟复查实际监听
+
+连续 3 次监听失败后，看门狗会先尝试重启。仍无法恢复且已显式开启「自动换端口」时，才会从 `2053、2083、2087、2096、10443` 中选择未被占用的候选端口，同时调整 Reality 和 Hysteria2，并保留配置备份。配置应用失败会恢复原配置。
+
+自动换端口默认关闭，24 小时最多切换一次。切换成功后必须重新导入客户端链接和二维码。
+
+**本机无法可靠判断运营商或 GFW 是否封堵端口。** 服务监听正常不代表客户端一定可达。外部封锁需要客户端或外部 TCP/UDP 探测复核，不应仅凭服务端自检频繁切换端口。
+
+![日志与自检](docs/images/maintenance.png)
 
 ## 安全说明
 

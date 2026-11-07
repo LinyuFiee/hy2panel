@@ -1,8 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { Activity, LayoutDashboard, Leaf, LogOut, ServerCog, Settings2, ShieldCheck, Waypoints } from '@lucide/vue'
+import { Activity, LayoutDashboard, Leaf, LogOut, ScrollText, ServerCog, Settings2, ShieldCheck } from '@lucide/vue'
 import DashboardView from './components/DashboardView.vue'
 import NodesView from './components/NodesView.vue'
+import MaintenanceView from './components/MaintenanceView.vue'
 import SettingsView from './components/SettingsView.vue'
 import HairlineFigure from './components/HairlineFigure.vue'
 
@@ -16,7 +17,10 @@ const copied = ref('')
 const state = ref(null)
 const settingsRef = ref(null)
 const networkSamples = ref([])
-const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false })
+const diagnosticReport = ref(null)
+const logEntries = ref([])
+const logUnit = ref('sing-box')
+const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false })
 const form = reactive({
   public_host: '',
   reality: { enabled: true, port: 443, server_name: 'www.microsoft.com', uuid: '', private_key: '', public_key: '', short_id: '' },
@@ -25,11 +29,13 @@ const form = reactive({
 const navItems = [
   { id: 'dashboard', label: '概览', icon: LayoutDashboard },
   { id: 'nodes', label: '节点管理', icon: ServerCog },
+  { id: 'maintenance', label: '日志与自检', icon: ScrollText },
   { id: 'settings', label: '系统设置', icon: Settings2 }
 ]
 const titles = {
   dashboard: ['节点概览', '实时掌握连接、流量与网络质量'],
   nodes: ['节点管理', '保留常用设置，把复杂参数收进高级选项'],
+  maintenance: ['日志与自检', '快速定位配置、监听、证书和服务异常'],
   settings: ['系统设置', 'RackNerd、BBR 与访问安全']
 }
 const currentTitle = computed(() => titles[activeTab.value])
@@ -111,6 +117,7 @@ function switchTab(tab) {
   activeTab.value = tab
   error.value = ''
   notice.value = ''
+  if (tab === 'maintenance' && !logEntries.value.length) loadLogs()
 }
 
 function showNotice(message) {
@@ -194,6 +201,48 @@ async function startSpeedTest() {
   }
 }
 
+async function runDiagnostics() {
+  busy.diagnostics = true
+  error.value = ''
+  try {
+    diagnosticReport.value = await request('/api/diagnostics', { method: 'POST', body: '{}' })
+    showNotice('服务端自检已完成')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.diagnostics = false
+  }
+}
+
+async function loadLogs(unit = logUnit.value) {
+  busy.logs = true
+  error.value = ''
+  try {
+    const payload = await request(`/api/logs?unit=${encodeURIComponent(unit)}&lines=150`)
+    logUnit.value = unit
+    logEntries.value = payload.entries
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.logs = false
+  }
+}
+
+async function updateRecovery(autoPort) {
+  busy.recovery = true
+  error.value = ''
+  try {
+    applyState(await request('/api/settings/recovery', {
+      method: 'POST', body: JSON.stringify({ auto_port: autoPort })
+    }))
+    showNotice(autoPort ? '已启用保守自动换端口' : '已关闭自动换端口，自动重启仍然有效')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.recovery = false
+  }
+}
+
 async function copyLink(name) {
   const link = state.value?.links[name]
   if (!link) return
@@ -216,11 +265,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main v-if="view === 'loading'" class="loading-screen"><div class="logo-mark large"><Waypoints :size="28" /></div><span>正在整理节点数据…</span></main>
+  <main v-if="view === 'loading'" class="loading-screen"><img class="logo-mark logo-image large" src="/logo.png" alt="hy2panel 白发男孩与白猫 Logo" /><span>正在整理节点数据…</span></main>
 
   <main v-else-if="view === 'login'" class="login-page">
     <section class="login-hero">
-      <div class="login-brand"><div class="logo-mark"><Waypoints :size="23" /></div><span>hy2panel</span></div>
+      <div class="login-brand"><img class="logo-mark logo-image" src="/logo.png" alt="hy2panel 白发男孩与白猫 Logo" /><span>hy2panel</span></div>
       <div class="login-hero-copy">
         <span class="eyebrow"><Leaf :size="14" /> A LIGHTER WAY TO CONNECT</span>
         <h1>小清新，<br />也能管好你的节点。</h1>
@@ -245,7 +294,7 @@ onBeforeUnmount(() => {
 
   <div v-else class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-brand"><div class="logo-mark"><Waypoints :size="22" /></div><div><strong>hy2panel</strong><span>轻盈节点管理</span></div></div>
+      <div class="sidebar-brand"><img class="logo-mark logo-image" src="/logo.png" alt="hy2panel 白发男孩与白猫 Logo" /><div><strong>hy2panel</strong><span>轻盈节点管理</span></div></div>
       <nav class="sidebar-nav">
         <button v-for="item in navItems" :key="item.id" :class="{ active: activeTab === item.id }" @click="switchTab(item.id)">
           <component :is="item.icon" :size="19" /><span>{{ item.label }}</span>
@@ -266,6 +315,7 @@ onBeforeUnmount(() => {
       <div v-if="notice" class="alert success-alert">{{ notice }}</div>
       <DashboardView v-if="activeTab === 'dashboard'" :state="state" :samples="networkSamples" :starting="busy.speedtest" @speedtest="startSpeedTest" @settings="switchTab('settings')" />
       <NodesView v-else-if="activeTab === 'nodes'" :form="form" :links="state.links" :saving="busy.nodes" :copied="copied" @save="saveNodes" @copy="copyLink" />
+      <MaintenanceView v-else-if="activeTab === 'maintenance'" :state="state" :report="diagnosticReport" :entries="logEntries" :log-unit="logUnit" :busy="busy" @diagnostics="runDiagnostics" @logs="loadLogs" @recovery="updateRecovery" />
       <SettingsView v-else ref="settingsRef" :state="state" :busy="busy" @save-racknerd="saveRackNerd" @clear-racknerd="clearRackNerd" @apply-bbr="applyBBR" />
     </main>
   </div>

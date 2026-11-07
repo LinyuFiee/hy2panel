@@ -61,6 +61,11 @@ func (r RackNerd) Configured() bool {
 	return r.APIKey != "" && r.APIHash != ""
 }
 
+type Recovery struct {
+	AutoPort       bool  `json:"auto_port"`
+	LastPortChange int64 `json:"last_port_change"`
+}
+
 type Config struct {
 	Version           int       `json:"version"`
 	AdminPasswordHash string    `json:"admin_password_hash,omitempty"`
@@ -68,6 +73,7 @@ type Config struct {
 	Reality           Reality   `json:"reality"`
 	Hysteria2         Hysteria2 `json:"hysteria2"`
 	RackNerd          RackNerd  `json:"racknerd"`
+	Recovery          Recovery  `json:"recovery"`
 }
 
 func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Config, error) {
@@ -221,6 +227,9 @@ func (c *Config) Validate() error {
 		if len(credential) > 512 || strings.TrimSpace(credential) != credential || strings.ContainsAny(credential, "\r\n\x00") {
 			return errors.New("RackNerd API 凭据格式无效")
 		}
+	}
+	if c.Recovery.LastPortChange < 0 {
+		return errors.New("上次端口切换时间无效")
 	}
 	return nil
 }

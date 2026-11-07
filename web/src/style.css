@@ -49,6 +49,7 @@ small { color: #8a9993; line-height: 1.55; }
   box-shadow: 0 7px 18px #579b8528;
 }
 .logo-mark.large { width: 56px; height: 56px; border-radius: 18px; }
+.logo-image { display: block; padding: 1px; object-fit: contain; background: #000; }
 
 .login-page {
   min-height: 100vh;
@@ -328,6 +329,48 @@ input[readonly] { color: #98a69f; background: #f5f7f5; }
 .security-list span { color: var(--muted); font-size: 11px; }
 .security-list strong { display: block; margin-top: 4px; color: #41574c; font-size: 12px; }
 
+.maintenance-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 18px; }
+.recovery-row { display: flex; align-items: center; gap: 12px; padding: 14px 0; border-bottom: 1px solid #edf1ee; }
+.recovery-row > div:nth-child(2) { flex: 1; }
+.recovery-row strong { display: block; margin-bottom: 4px; font-size: 13px; }
+.recovery-row p { margin: 0; font-size: 11px; }
+.recovery-icon { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; background: var(--mint-soft); color: var(--mint); }
+.recovery-icon.lavender { background: #efedf8; color: var(--lavender); }
+.recovery-note { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0 10px; padding: 12px; border-radius: 11px; background: #f7f5ed; color: #a38d56; }
+.recovery-note svg { flex: 0 0 auto; margin-top: 2px; }
+.recovery-note p { margin: 0; color: #8d805e; font-size: 10px; }
+.diagnostic-summary { display: flex; align-items: center; gap: 14px; min-height: 116px; margin-bottom: 18px; }
+.diagnostic-icon { width: 52px; height: 52px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 16px; background: var(--mint-soft); color: var(--mint); }
+.diagnostic-summary strong { display: block; margin-bottom: 6px; font-size: 14px; }
+.diagnostic-summary p { margin: 0; font-size: 11px; }
+.spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.diagnostic-list { display: grid; gap: 10px; }
+.diagnostic-item { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid #e8eeea; border-radius: 12px; }
+.diagnostic-item > svg { flex: 0 0 auto; margin-top: 1px; }
+.diagnostic-item.pass > svg { color: var(--mint); }
+.diagnostic-item.warn > svg { color: #b69558; }
+.diagnostic-item.fail > svg { color: var(--red); }
+.diagnostic-item.info > svg { color: #7996ae; }
+.diagnostic-content { min-width: 0; flex: 1; }
+.diagnostic-content > div { display: flex; align-items: center; gap: 8px; }
+.diagnostic-content strong { font-size: 12px; }
+.diagnostic-content p { margin: 5px 0; font-size: 11px; overflow-wrap: anywhere; }
+.diagnostic-content small { display: flex; align-items: flex-start; gap: 4px; color: #8a9991; font-size: 10px; }
+.diagnostic-content small svg { flex: 0 0 auto; margin-top: 1px; }
+.diagnostic-badge { padding: 2px 6px; border-radius: 6px; font-size: 9px; }
+.diagnostic-badge.pass { background: var(--mint-soft); color: var(--mint-dark); }
+.diagnostic-badge.warn { background: #f8f1df; color: #9a7b3e; }
+.diagnostic-badge.fail { background: #f9e8e8; color: var(--red); }
+.diagnostic-badge.info { background: #eaf1f5; color: #64869c; }
+.log-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.log-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.log-tabs button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; background: white; color: #81938a; font-size: 10px; }
+.log-tabs button.active { border-color: #b9d5c8; background: var(--mint-soft); color: var(--mint-dark); }
+.small-button { min-height: 32px; padding: 6px 10px; font-size: 10px; }
+.log-viewer { height: 380px; overflow: auto; padding: 15px; border-radius: 12px; background: #202a26; color: #c9d9d0; font: 11px/1.75 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.log-line { white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-empty { color: #869b8f; }
 .alert { margin-bottom: 18px; padding: 12px 15px; border-radius: 11px; font-size: 12px; }
 .error-alert { border: 1px solid #f0dcdc; background: #fdf3f3; color: #a95555; }
 .success-alert { border: 1px solid #d8e9df; background: #edf7f1; color: #477c64; }
