@@ -125,6 +125,17 @@ LibreSpeed 返回的 `download`/`upload` 单位是 Mbps，面板直接按 Mbps �
 
 升级不会覆盖 `/etc/hy2panel/panel.json`，域名、密钥、UUID、密码和 RackNerd 凭据保持不变。升级完成后页面需要刷新一次。GitHub API 不可达时只显示错误，不会影响节点运行。
 
+### 从 v0.3.x 升级到 v0.4.0
+
+v0.3.x 尚未安装升级单元，需要在服务器上手动执行一次。脚本会下载最新发布包、校验 SHA-256、备份后替换二进制与 systemd 单元，并保留现有配置：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/v0.4.0/scripts/hy2panel-upgrade.sh -o /tmp/hy2panel-upgrade.sh
+bash /tmp/hy2panel-upgrade.sh
+```
+
+执行完成后 `hy2panel-upgrade.path` 已启用，后续版本可直接在面板内一键升级。若脚本失败，会自动恢复旧二进制和单元。
+
 ## 日志、自检与自动恢复
 
 「日志与自检」页面提供：
