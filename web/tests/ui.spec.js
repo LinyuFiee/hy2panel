@@ -16,6 +16,7 @@ test('dashboard renders metrics and Hairline without runtime errors', async ({ p
   await expect(page.locator('.hairline-figure svg')).toBeVisible()
   await expect(page.locator('.download-line')).toHaveAttribute('d', /L/)
   await expect(page.locator('.sidebar-brand .logo-image')).toHaveAttribute('src', '/logo.png')
+  await expect(page.locator('.sidebar-brand .logo-image')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   expect(await page.locator('.sidebar-brand .logo-image').evaluate(image => image.naturalWidth > 0)).toBe(true)
   expect((await page.request.get('/logo.png')).status()).toBe(200)
   await page.screenshot({ path: '../docs/images/dashboard.png', fullPage: true })

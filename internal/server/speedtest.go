@@ -100,22 +100,43 @@ func (t *SpeedTester) execute(ctx context.Context) (SpeedTestResult, error) {
 	return parseSpeedTest(stdout.Bytes())
 }
 
+type speedTestPayload struct {
+	Timestamp time.Time `json:"timestamp"`
+	Server    struct {
+		Name string `json:"name"`
+	} `json:"server"`
+	BytesSent     uint64  `json:"bytes_sent"`
+	BytesReceived uint64  `json:"bytes_received"`
+	Ping          float64 `json:"ping"`
+	Jitter        float64 `json:"jitter"`
+	Upload        float64 `json:"upload"`
+	Download      float64 `json:"download"`
+}
+
 func parseSpeedTest(output []byte) (SpeedTestResult, error) {
-	var payload struct {
-		Timestamp time.Time `json:"timestamp"`
-		Server    struct {
-			Name string `json:"name"`
-		} `json:"server"`
-		BytesSent     uint64  `json:"bytes_sent"`
-		BytesReceived uint64  `json:"bytes_received"`
-		Ping          float64 `json:"ping"`
-		Jitter        float64 `json:"jitter"`
-		Upload        float64 `json:"upload"`
-		Download      float64 `json:"download"`
+	trimmed := bytes.TrimSpace(output)
+	if len(trimmed) == 0 {
+		return SpeedTestResult{}, errors.New("测速工具没有返回结果")
 	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return SpeedTestResult{}, errors.New("测速结果不是有效 JSON")
+	var payloads []speedTestPayload
+	switch trimmed[0] {
+	case '[':
+		if err := json.Unmarshal(trimmed, &payloads); err != nil {
+			return SpeedTestResult{}, errors.New("测速结果不是有效的 JSON 数组")
+		}
+	case '{':
+		var payload speedTestPayload
+		if err := json.Unmarshal(trimmed, &payload); err != nil {
+			return SpeedTestResult{}, errors.New("测速结果不是有效的 JSON 对象")
+		}
+		payloads = []speedTestPayload{payload}
+	default:
+		return SpeedTestResult{}, errors.New("测速结果不是有效的 JSON")
 	}
+	if len(payloads) == 0 {
+		return SpeedTestResult{}, errors.New("测速未返回可用服务器结果")
+	}
+	payload := payloads[len(payloads)-1]
 	if payload.Download < 0 || payload.Upload < 0 || payload.Ping < 0 || payload.Jitter < 0 {
 		return SpeedTestResult{}, errors.New("测速结果包含无效数值")
 	}

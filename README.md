@@ -71,7 +71,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新 Release。固定版本：
 
 ```bash
-export HY2PANEL_VERSION="v0.3.0"
+export HY2PANEL_VERSION="v0.3.1"
 ```
 
 ## RackNerd 流量配置
@@ -122,6 +122,9 @@ API 请求失败时，错误信息仅显示在管理面板。成功结果缓存 
 - 客户端链接和二维码包含完整连接凭据，请勿公开分享。
 - 初始密码只显示在 root 凭据文件中，不要提交到 issue 或聊天截图。
 - 安装器检测到已有 `/etc/hy2panel/panel.json` 时会停止，避免覆盖现有密钥。
+- README 和测试中的 `203.0.113.10`、`198.51.100.20`、`192.0.2.10` 均为 RFC 保留示例地址，不是用户真实 IP。
+- 交互安装摘要中的公网 IP 和管理 IP 来自当前输入或 SSH 会话，仅显示在本机终端，不会写入 GitHub 脚本或文档。
+- 面板服务仅附加 `systemd-journal` 组以读取日志，不以 root 身份运行。
 
 ## 本地开发
 

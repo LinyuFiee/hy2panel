@@ -8,6 +8,7 @@ Requires=hy2panel-firewall.service
 Type=simple
 User=hy2panel
 Group=hy2panel
+SupplementaryGroups=systemd-journal
 ExecStart=/usr/local/bin/hy2panel serve --config /etc/hy2panel/panel.json
 Restart=on-failure
 RestartSec=3s

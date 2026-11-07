@@ -16,6 +16,16 @@ func TestParseSpeedTest(t *testing.T) {
 	}
 }
 
+func TestParseSpeedTestJSONArray(t *testing.T) {
+	result, err := parseSpeedTest([]byte(`[{"timestamp":"2026-11-07T10:00:00Z","server":{"name":"Array Server"},"bytes_sent":1000,"bytes_received":2000,"ping":12.5,"jitter":1.2,"upload":100000000,"download":500000000}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ServerName != "Array Server" || result.DownloadBps != 500000000 {
+		t.Fatalf("unexpected array result: %#v", result)
+	}
+}
+
 func TestParseSpeedTestRejectsInvalidData(t *testing.T) {
 	if _, err := parseSpeedTest([]byte(`{"download":-1}`)); err == nil {
 		t.Fatal("expected negative speed to fail")
