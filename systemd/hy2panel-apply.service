@@ -1,0 +1,12 @@
+[Unit]
+Description=Validate and apply sing-box configuration
+After=sing-box.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-apply
+TimeoutStartSec=50s
+PrivateTmp=true
+ProtectHome=true

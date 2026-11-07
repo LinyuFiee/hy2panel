@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.27.3
+          cache-dependency-path: go.sum
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Test backend
+        run: |
+          go test ./...
+          go vet ./...
+      - name: Check scripts
+        run: bash -n scripts/install.sh scripts/hy2panel-apply.sh scripts/cert-deploy.sh scripts/bootstrap.sh
+      - name: Build Linux binary
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
+      - name: Package release
+        run: |
+          mkdir -p release/bundle/dist release/bundle/scripts release/bundle/systemd
+          cp dist/hy2panel-linux-amd64 release/bundle/dist/
+          cp scripts/install.sh scripts/hy2panel-apply.sh scripts/cert-deploy.sh scripts/99-hy2panel.conf release/bundle/scripts/
+          cp systemd/hy2panel.service systemd/hy2panel-firewall.service systemd/hy2panel-apply.path systemd/hy2panel-apply.service systemd/sing-box.service release/bundle/systemd/
+          tar -czf release/hy2panel-bundle-linux-amd64.tar.gz -C release/bundle .
+          cd release
+          sha256sum hy2panel-bundle-linux-amd64.tar.gz > hy2panel-bundle-linux-amd64.tar.gz.sha256
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" release/hy2panel-bundle-linux-amd64.tar.gz release/hy2panel-bundle-linux-amd64.tar.gz.sha256 --title "${GITHUB_REF_NAME}" --generate-notes

@@ -1,0 +1,10 @@
+.tools/
+.tmp/
+.codeartsdoer/
+dist/
+release/
+node_modules/
+web/node_modules/
+web/dist/
+*.exe
+*.test

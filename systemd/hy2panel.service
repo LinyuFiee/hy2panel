@@ -1,0 +1,28 @@
+[Unit]
+Description=hy2panel management UI
+After=network-online.target hy2panel-firewall.service
+Wants=network-online.target
+Requires=hy2panel-firewall.service
+
+[Service]
+Type=simple
+User=hy2panel
+Group=hy2panel
+ExecStart=/usr/local/bin/hy2panel serve --config /etc/hy2panel/panel.json
+Restart=on-failure
+RestartSec=3s
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/etc/hy2panel
+
+[Install]
+WantedBy=multi-user.target

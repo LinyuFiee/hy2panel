@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for hy2panel configuration changes
+
+[Path]
+PathExists=/etc/hy2panel/apply.request
+Unit=hy2panel-apply.service
+
+[Install]
+WantedBy=multi-user.target

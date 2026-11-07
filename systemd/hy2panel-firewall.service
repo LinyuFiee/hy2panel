@@ -1,0 +1,15 @@
+[Unit]
+Description=Restrict hy2panel management port
+After=network-pre.target
+Wants=network-pre.target
+Before=hy2panel.service
+
+[Service]
+Type=oneshot
+ExecStartPre=-/usr/sbin/nft delete table inet hy2panel
+ExecStart=/usr/sbin/nft -f /etc/hy2panel/firewall.nft
+ExecStop=-/usr/sbin/nft delete table inet hy2panel
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
