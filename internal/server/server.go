@@ -5,32 +5,43 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"hy2panel/internal/config"
+	"hy2panel/internal/racknerd"
 	"hy2panel/internal/store"
 	panelweb "hy2panel/web"
 )
 
 type Server struct {
-	store   *store.Store
-	auth    *authenticator
-	applier Applier
-	applyMu sync.Mutex
+	store            *store.Store
+	auth             *authenticator
+	applier          Applier
+	applyMu          sync.Mutex
+	bbr              BBRApplier
+	bbrMu            sync.Mutex
+	speedtest        *SpeedTester
+	rackNerdClient   rackNerdInfoClient
+	rackNerdMu       sync.Mutex
+	rackNerdCache    RackNerdView
+	rackNerdCachedAt time.Time
+	rackNerdTTL      time.Duration
 }
 
 type stateResponse struct {
-	Config config.Config     `json:"config"`
-	Links  map[string]string `json:"links"`
-	Status Status            `json:"status"`
+	Config    config.Config     `json:"config"`
+	Links     map[string]string `json:"links"`
+	Status    Status            `json:"status"`
+	RackNerd  RackNerdView      `json:"racknerd"`
+	SpeedTest SpeedTestState    `json:"speedtest"`
 }
 
 type updateRequest struct {
@@ -40,7 +51,14 @@ type updateRequest struct {
 }
 
 func New(store *store.Store, applier Applier) *Server {
-	return &Server{store: store, auth: newAuthenticator(), applier: applier}
+	return &Server{
+		store:          store,
+		auth:           newAuthenticator(),
+		applier:        applier,
+		bbr:            FileBBRApplier{Dir: filepath.Dir(store.Path())},
+		speedtest:      NewSpeedTester(),
+		rackNerdClient: &racknerd.Client{},
+	}
 }
 
 func (s *Server) Serve(ctx context.Context) error {
@@ -84,6 +102,9 @@ func (s *Server) routes(prefix netip.Prefix) http.Handler {
 	mux.Handle("POST /api/logout", s.requireAuth(http.HandlerFunc(s.logout)))
 	mux.Handle("GET /api/state", s.requireAuth(http.HandlerFunc(s.state)))
 	mux.Handle("POST /api/config", s.requireAuth(http.HandlerFunc(s.updateConfig)))
+	mux.Handle("POST /api/settings/racknerd", s.requireAuth(http.HandlerFunc(s.updateRackNerd)))
+	mux.Handle("POST /api/bbr", s.requireAuth(http.HandlerFunc(s.applyBBR)))
+	mux.Handle("POST /api/speedtest", s.requireAuth(http.HandlerFunc(s.startSpeedTest)))
 	mux.Handle("GET /", http.FileServer(http.FS(panelweb.Dist())))
 	return securityHeaders(whitelist(prefix, mux))
 }
@@ -132,11 +153,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "读取配置失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, stateResponse{
-		Config: cfg.Public(),
-		Links:  cfg.ClientLinks(),
-		Status: readStatus(r.Context()),
-	})
+	writeJSON(w, http.StatusOK, s.makeState(r.Context(), cfg))
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
@@ -187,11 +204,7 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "节点已应用，但面板配置保存失败")
 		return
 	}
-	writeJSON(w, http.StatusOK, stateResponse{
-		Config: next.Public(),
-		Links:  next.ClientLinks(),
-		Status: readStatus(r.Context()),
-	})
+	writeJSON(w, http.StatusOK, s.makeState(r.Context(), &next))
 }
 
 func (s *Server) requireAuth(next http.Handler) http.Handler {

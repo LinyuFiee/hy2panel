@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply the managed BBR and fq profile
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-bbr
+TimeoutStartSec=35s
+PrivateTmp=true
+ProtectHome=true

@@ -52,12 +52,22 @@ type Hysteria2 struct {
 	DownMbps int    `json:"down_mbps"`
 }
 
+type RackNerd struct {
+	APIKey  string `json:"api_key,omitempty"`
+	APIHash string `json:"api_hash,omitempty"`
+}
+
+func (r RackNerd) Configured() bool {
+	return r.APIKey != "" && r.APIHash != ""
+}
+
 type Config struct {
 	Version           int       `json:"version"`
 	AdminPasswordHash string    `json:"admin_password_hash,omitempty"`
 	Panel             Panel     `json:"panel"`
 	Reality           Reality   `json:"reality"`
 	Hysteria2         Hysteria2 `json:"hysteria2"`
+	RackNerd          RackNerd  `json:"racknerd"`
 }
 
 func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Config, error) {
@@ -128,6 +138,8 @@ func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Con
 func (c *Config) Public() Config {
 	copy := *c
 	copy.AdminPasswordHash = ""
+	copy.RackNerd.APIKey = ""
+	copy.RackNerd.APIHash = ""
 	return copy
 }
 
@@ -200,6 +212,14 @@ func (c *Config) Validate() error {
 		}
 		if err := validateCertPaths(c.Hysteria2.CertFile, c.Hysteria2.KeyFile); err != nil {
 			return err
+		}
+	}
+	if (c.RackNerd.APIKey == "") != (c.RackNerd.APIHash == "") {
+		return errors.New("RackNerd API Key 和 Hash 必须同时设置")
+	}
+	for _, credential := range []string{c.RackNerd.APIKey, c.RackNerd.APIHash} {
+		if len(credential) > 512 || strings.TrimSpace(credential) != credential || strings.ContainsAny(credential, "\r\n\x00") {
+			return errors.New("RackNerd API 凭据格式无效")
 		}
 	}
 	return nil

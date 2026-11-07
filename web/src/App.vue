@@ -1,38 +1,42 @@
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
-import QRCode from 'qrcode'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { Activity, LayoutDashboard, Leaf, LogOut, ServerCog, Settings2, ShieldCheck, Waypoints } from '@lucide/vue'
+import DashboardView from './components/DashboardView.vue'
+import NodesView from './components/NodesView.vue'
+import SettingsView from './components/SettingsView.vue'
+import HairlineFigure from './components/HairlineFigure.vue'
 
 const view = ref('loading')
+const activeTab = ref('dashboard')
 const password = ref('')
 const error = ref('')
 const notice = ref('')
-const busy = ref(false)
+const loginBusy = ref(false)
 const copied = ref('')
 const state = ref(null)
-const qr = reactive({ reality: '', hysteria2: '' })
+const settingsRef = ref(null)
+const networkSamples = ref([])
+const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false })
 const form = reactive({
   public_host: '',
-  reality: {
-    enabled: true,
-    port: 443,
-    server_name: 'www.microsoft.com',
-    uuid: '',
-    private_key: '',
-    public_key: '',
-    short_id: ''
-  },
-  hysteria2: {
-    enabled: false,
-    port: 443,
-    domain: '',
-    password: '',
-    up_mbps: 100,
-    down_mbps: 100
-  }
+  reality: { enabled: true, port: 443, server_name: 'www.microsoft.com', uuid: '', private_key: '', public_key: '', short_id: '' },
+  hysteria2: { enabled: false, port: 443, domain: '', password: '', up_mbps: 100, down_mbps: 100 }
 })
-
+const navItems = [
+  { id: 'dashboard', label: '概览', icon: LayoutDashboard },
+  { id: 'nodes', label: '节点管理', icon: ServerCog },
+  { id: 'settings', label: '系统设置', icon: Settings2 }
+]
+const titles = {
+  dashboard: ['节点概览', '实时掌握连接、流量与网络质量'],
+  nodes: ['节点管理', '保留常用设置，把复杂参数收进高级选项'],
+  settings: ['系统设置', 'RackNerd、BBR 与访问安全']
+}
+const currentTitle = computed(() => titles[activeTab.value])
 const panelAddress = computed(() => state.value ? `https://${state.value.config.panel.domain}:8443` : '')
-const serviceClass = computed(() => state.value?.status.sing_box === 'active' ? 'online' : 'offline')
+let pollTimer
+let noticeTimer
+let refreshing = false
 
 async function request(path, options = {}) {
   const headers = { 'X-Requested-With': 'fetch', ...(options.headers || {}) }
@@ -51,247 +55,218 @@ async function request(path, options = {}) {
   return payload
 }
 
-function applyState(payload) {
+function syncForms(config) {
+  form.public_host = config.panel.public_host
+  Object.assign(form.reality, config.reality)
+  Object.assign(form.hysteria2, config.hysteria2)
+}
+
+function applyState(payload, sync = false) {
   state.value = payload
-  form.public_host = payload.config.panel.public_host
-  Object.assign(form.reality, payload.config.reality)
-  Object.assign(form.hysteria2, payload.config.hysteria2)
-  updateQR('reality', payload.links.reality)
-  updateQR('hysteria2', payload.links.hysteria2)
+  if (sync) syncForms(payload.config)
+  const status = payload.status
+  networkSamples.value = [...networkSamples.value, { rx: status.rx_bytes_per_second, tx: status.tx_bytes_per_second }].slice(-30)
 }
 
-async function updateQR(name, value) {
-  qr[name] = value ? await QRCode.toDataURL(value, { width: 360, margin: 1 }) : ''
-}
-
-async function loadState() {
-  error.value = ''
+async function refresh(sync = false, showError = false) {
+  if (refreshing) return
+  refreshing = true
   try {
-    applyState(await request('/api/state'))
-    view.value = 'dashboard'
+    applyState(await request('/api/state'), sync)
+    view.value = 'app'
   } catch (failure) {
-    if (failure.status !== 401) error.value = failure.message
-    if (view.value !== 'login') view.value = 'login'
+    if (showError && failure.status !== 401) error.value = failure.message
+    if (view.value !== 'login' && !state.value) view.value = 'login'
+  } finally {
+    refreshing = false
   }
 }
 
 async function login() {
-  busy.value = true
+  loginBusy.value = true
   error.value = ''
   try {
     await request('/api/login', { method: 'POST', body: JSON.stringify({ password: password.value }) })
     password.value = ''
-    await loadState()
+    activeTab.value = 'dashboard'
+    await refresh(true, true)
   } catch (failure) {
     error.value = failure.message
   } finally {
-    busy.value = false
+    loginBusy.value = false
   }
 }
 
 async function logout() {
-  busy.value = true
   try {
     await request('/api/logout', { method: 'POST', body: '{}' })
   } catch {
   } finally {
     state.value = null
     view.value = 'login'
-    busy.value = false
   }
 }
 
-async function save() {
-  busy.value = true
+function switchTab(tab) {
+  activeTab.value = tab
   error.value = ''
   notice.value = ''
+}
+
+function showNotice(message) {
+  notice.value = message
+  window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => { notice.value = '' }, 4000)
+}
+
+async function saveNodes() {
+  busy.nodes = true
+  error.value = ''
   try {
-    const payload = await request('/api/config', {
+    applyState(await request('/api/config', {
       method: 'POST',
-      body: JSON.stringify({
-        public_host: form.public_host,
-        reality: form.reality,
-        hysteria2: form.hysteria2
-      })
-    })
-    applyState(payload)
-    notice.value = '配置已通过校验并应用。'
+      body: JSON.stringify({ public_host: form.public_host, reality: form.reality, hysteria2: form.hysteria2 })
+    }), true)
+    showNotice('节点配置已校验并应用')
   } catch (failure) {
     error.value = failure.message
   } finally {
-    busy.value = false
+    busy.nodes = false
+  }
+}
+
+async function saveRackNerd({ apiKey, apiHash }) {
+  busy.racknerd = true
+  error.value = ''
+  try {
+    applyState(await request('/api/settings/racknerd', {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey, api_hash: apiHash, clear: false })
+    }))
+    settingsRef.value?.clearCredentials()
+    showNotice('RackNerd 配置已保存')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.racknerd = false
+  }
+}
+
+async function clearRackNerd() {
+  busy.racknerd = true
+  error.value = ''
+  try {
+    applyState(await request('/api/settings/racknerd', {
+      method: 'POST', body: JSON.stringify({ api_key: '', api_hash: '', clear: true })
+    }))
+    settingsRef.value?.clearCredentials()
+    showNotice('RackNerd 凭据已清除')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.racknerd = false
+  }
+}
+
+async function applyBBR() {
+  busy.bbr = true
+  error.value = ''
+  try {
+    applyState(await request('/api/bbr', { method: 'POST', body: '{}' }))
+    showNotice('BBR + fq 已应用')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.bbr = false
+  }
+}
+
+async function startSpeedTest() {
+  busy.speedtest = true
+  error.value = ''
+  try {
+    state.value.speedtest = await request('/api/speedtest', { method: 'POST', body: '{}' })
+    showNotice('测速已开始，通常需要半分钟左右')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.speedtest = false
   }
 }
 
 async function copyLink(name) {
-  const value = state.value?.links[name]
-  if (!value) return
-  await navigator.clipboard.writeText(value)
+  const link = state.value?.links[name]
+  if (!link) return
+  await navigator.clipboard.writeText(link)
   copied.value = name
-  window.setTimeout(() => {
-    if (copied.value === name) copied.value = ''
-  }, 1600)
+  window.setTimeout(() => { if (copied.value === name) copied.value = '' }, 1600)
 }
 
-onMounted(loadState)
+onMounted(async () => {
+  await refresh(true, true)
+  pollTimer = window.setInterval(() => {
+    if (view.value === 'app' && !document.hidden) refresh(false, false)
+  }, 3000)
+})
+
+onBeforeUnmount(() => {
+  window.clearInterval(pollTimer)
+  window.clearTimeout(noticeTimer)
+})
 </script>
 
 <template>
-  <main v-if="view === 'loading'" class="login-shell">
-    <p class="muted">正在连接面板…</p>
-  </main>
+  <main v-if="view === 'loading'" class="loading-screen"><div class="logo-mark large"><Waypoints :size="28" /></div><span>正在整理节点数据…</span></main>
 
-  <main v-else-if="view === 'login'" class="login-shell">
-    <section class="login-card">
-      <div class="brand">
-        <div class="brand-mark">H2</div>
-        <div>
-          <h1>节点控制台</h1>
-          <p class="muted">Reality 与 Hysteria2 管理</p>
-        </div>
+  <main v-else-if="view === 'login'" class="login-page">
+    <section class="login-hero">
+      <div class="login-brand"><div class="logo-mark"><Waypoints :size="23" /></div><span>hy2panel</span></div>
+      <div class="login-hero-copy">
+        <span class="eyebrow"><Leaf :size="14" /> A LIGHTER WAY TO CONNECT</span>
+        <h1>小清新，<br />也能管好你的节点。</h1>
+        <p>Reality、Hysteria2、流量与网络质量。<br />少一点复杂，多一点一目了然。</p>
       </div>
-      <form style="margin-top: 28px" @submit.prevent="login">
-        <div v-if="error" class="alert error">{{ error }}</div>
-        <div class="field">
-          <label for="password">管理员密码</label>
-          <input id="password" v-model="password" type="password" autocomplete="current-password" required autofocus />
-        </div>
-        <button class="primary full" type="submit" :disabled="busy">{{ busy ? '登录中…' : '安全登录' }}</button>
+      <HairlineFigure />
+      <small>移动指针，和这台小路由器打个招呼。</small>
+    </section>
+    <section class="login-form-wrap">
+      <form class="login-form" @submit.prevent="login">
+        <div class="login-lock"><ShieldCheck :size="24" /></div>
+        <span class="section-kicker">WELCOME BACK</span>
+        <h2>欢迎回来</h2>
+        <p>输入管理员密码，继续前往节点控制台。</p>
+        <div v-if="error" class="alert error-alert">{{ error }}</div>
+        <label>管理员密码<input v-model="password" type="password" autocomplete="current-password" placeholder="输入密码" required autofocus /></label>
+        <button class="primary-button full-button" type="submit" :disabled="loginBusy">{{ loginBusy ? '正在登录…' : '进入控制台' }}</button>
+        <div class="login-security"><ShieldCheck :size="14" />HTTPS · IP 白名单 · 安全会话</div>
       </form>
-      <p class="footer-note">仅允许白名单管理 IP 访问。会话 Cookie 使用 Secure、HttpOnly 和 SameSite=Strict。</p>
     </section>
   </main>
 
-  <main v-else class="shell">
-    <header class="topbar">
-      <div>
-        <h1>节点控制台</h1>
-        <p class="muted">{{ panelAddress }}</p>
+  <div v-else class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><div class="logo-mark"><Waypoints :size="22" /></div><div><strong>hy2panel</strong><span>轻盈节点管理</span></div></div>
+      <nav class="sidebar-nav">
+        <button v-for="item in navItems" :key="item.id" :class="{ active: activeTab === item.id }" @click="switchTab(item.id)">
+          <component :is="item.icon" :size="19" /><span>{{ item.label }}</span>
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sidebar-status"><Activity :size="16" /><div><strong :class="state.status.sing_box === 'active' ? 'text-green' : 'text-red'">{{ state.status.sing_box === 'active' ? '服务运行正常' : '服务需要检查' }}</strong><span>{{ panelAddress }}</span></div></div>
+        <button class="logout-button" @click="logout"><LogOut :size="17" />退出登录</button>
       </div>
-      <button class="secondary" type="button" :disabled="busy" @click="logout">退出登录</button>
-    </header>
+    </aside>
 
-    <div v-if="error" class="alert error">{{ error }}</div>
-    <div v-if="notice" class="alert success">{{ notice }}</div>
-
-    <section class="stats">
-      <div class="stat">
-        <div class="stat-label">sing-box</div>
-        <div class="stat-value" :class="serviceClass">{{ state.status.sing_box }}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">系统负载</div>
-        <div class="stat-value">{{ state.status.load_average }}</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">内存使用</div>
-        <div class="stat-value">{{ state.status.memory_used_mb }} MB</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">内存总量</div>
-        <div class="stat-value">{{ state.status.memory_total_mb }} MB</div>
-      </div>
-    </section>
-
-    <form class="grid" @submit.prevent="save">
-      <section class="card wide">
-        <h2>节点地址</h2>
-        <div class="field">
-          <label for="public-host">Reality 使用的公网 IPv4、IPv6 或域名</label>
-          <input id="public-host" v-model.trim="form.public_host" required />
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>VLESS Reality Vision</h2>
-            <p class="muted">TCP 主力节点，不需要自己的节点证书。</p>
-          </div>
-          <label class="switch"><input v-model="form.reality.enabled" type="checkbox" />启用</label>
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="reality-port">TCP 端口</label>
-            <input id="reality-port" v-model.number="form.reality.port" type="number" min="1" max="65535" required />
-          </div>
-          <div class="field">
-            <label for="reality-sni">Reality SNI / 握手目标</label>
-            <input id="reality-sni" v-model.trim="form.reality.server_name" required />
-          </div>
-          <div class="field span">
-            <label for="reality-uuid">UUID</label>
-            <input id="reality-uuid" v-model.trim="form.reality.uuid" required />
-          </div>
-          <div class="field span">
-            <label for="reality-private">Reality 私钥</label>
-            <input id="reality-private" v-model.trim="form.reality.private_key" type="password" autocomplete="off" required />
-          </div>
-          <div class="field span">
-            <label for="reality-public">Reality 公钥</label>
-            <input id="reality-public" v-model.trim="form.reality.public_key" readonly required />
-          </div>
-          <div class="field">
-            <label for="reality-short">Short ID</label>
-            <input id="reality-short" v-model.trim="form.reality.short_id" required />
-          </div>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>Hysteria2</h2>
-            <p class="muted">UDP 备选节点，带宽应根据实测逐步调整。</p>
-          </div>
-          <label class="switch"><input v-model="form.hysteria2.enabled" type="checkbox" />启用</label>
-        </div>
-        <div class="form-grid">
-          <div class="field">
-            <label for="hy2-port">UDP 端口</label>
-            <input id="hy2-port" v-model.number="form.hysteria2.port" type="number" min="1" max="65535" required />
-          </div>
-          <div class="field">
-            <label for="hy2-domain">证书域名</label>
-            <input id="hy2-domain" v-model="form.hysteria2.domain" readonly />
-          </div>
-          <div class="field span">
-            <label for="hy2-password">连接密码</label>
-            <input id="hy2-password" v-model.trim="form.hysteria2.password" type="password" autocomplete="off" required />
-          </div>
-          <div class="field">
-            <label for="hy2-up">服务器上传 Mbps</label>
-            <input id="hy2-up" v-model.number="form.hysteria2.up_mbps" type="number" min="1" max="10000" required />
-          </div>
-          <div class="field">
-            <label for="hy2-down">服务器下载 Mbps</label>
-            <input id="hy2-down" v-model.number="form.hysteria2.down_mbps" type="number" min="1" max="10000" required />
-          </div>
-        </div>
-      </section>
-
-      <div class="card wide">
-        <button class="primary" type="submit" :disabled="busy">{{ busy ? '校验并应用中…' : '校验并应用配置' }}</button>
-        <p class="footer-note">应用前由 sing-box 校验候选配置；服务启动失败时恢复上一份可用配置。修改 Hysteria2 带宽不等于获得共享端口的保障速率。</p>
-      </div>
-    </form>
-
-    <section v-if="Object.keys(state.links).length" class="card" style="margin-top: 18px">
-      <h2>客户端链接与二维码</h2>
-      <div class="links">
-        <article v-for="(link, name) in state.links" :key="name" class="link-item">
-          <div class="link-head">
-            <h3>{{ name === 'reality' ? 'VLESS Reality Vision' : 'Hysteria2' }}</h3>
-            <button class="secondary" type="button" @click="copyLink(name)">{{ copied === name ? '已复制' : '复制链接' }}</button>
-          </div>
-          <details>
-            <summary class="muted">显示敏感链接与二维码</summary>
-            <textarea class="secret-link" :value="link" readonly rows="4" @focus="$event.target.select()"></textarea>
-            <img v-if="qr[name]" class="qr" :src="qr[name]" :alt="`${name} 客户端二维码`" />
-          </details>
-        </article>
-      </div>
-      <p class="footer-note">这些链接包含完整连接凭据，请勿发送到群聊、截图公开或提交到在线二维码服务。二维码在本地浏览器生成。</p>
-    </section>
-  </main>
+    <main class="main-content">
+      <header class="page-header">
+        <div><h1>{{ currentTitle[0] }}</h1><p>{{ currentTitle[1] }}</p></div>
+        <span class="status-pill" :class="state.status.sing_box === 'active' ? 'ok' : 'warn'"><i></i>{{ state.status.sing_box === 'active' ? '节点在线' : '节点异常' }}</span>
+      </header>
+      <div v-if="error" class="alert error-alert">{{ error }}</div>
+      <div v-if="notice" class="alert success-alert">{{ notice }}</div>
+      <DashboardView v-if="activeTab === 'dashboard'" :state="state" :samples="networkSamples" :starting="busy.speedtest" @speedtest="startSpeedTest" @settings="switchTab('settings')" />
+      <NodesView v-else-if="activeTab === 'nodes'" :form="form" :links="state.links" :saving="busy.nodes" :copied="copied" @save="saveNodes" @copy="copyLink" />
+      <SettingsView v-else ref="settingsRef" :state="state" :busy="busy" @save-racknerd="saveRackNerd" @clear-racknerd="clearRackNerd" @apply-bbr="applyBBR" />
+    </main>
+  </div>
 </template>

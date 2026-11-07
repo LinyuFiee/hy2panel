@@ -69,6 +69,8 @@ func runInit(args []string) error {
 	if err != nil {
 		return err
 	}
+	cfg.RackNerd.APIKey = os.Getenv("RACKNERD_API_KEY")
+	cfg.RackNerd.APIHash = os.Getenv("RACKNERD_API_HASH")
 	return store.New(*path).Save(cfg)
 }
 

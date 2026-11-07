@@ -62,6 +62,17 @@ SING_BOX_ARCHIVE="sing-box-${SING_BOX_VERSION}-linux-amd64.tar.gz"
 curl -fL "https://github.com/SagerNet/sing-box/releases/download/${SING_BOX_TAG}/${SING_BOX_ARCHIVE}" -o "${WORK_DIR}/${SING_BOX_ARCHIVE}"
 tar -xzf "${WORK_DIR}/${SING_BOX_ARCHIVE}" -C "${WORK_DIR}"
 
+LIBRESPEED_VERSION=1.0.14
+LIBRESPEED_ARCHIVE="librespeed-cli_${LIBRESPEED_VERSION}_linux_amd64.tar.gz"
+LIBRESPEED_BASE_URL="https://github.com/librespeed/speedtest-cli/releases/download/v${LIBRESPEED_VERSION}"
+curl -fL "${LIBRESPEED_BASE_URL}/${LIBRESPEED_ARCHIVE}" -o "${WORK_DIR}/${LIBRESPEED_ARCHIVE}"
+curl -fsSL "${LIBRESPEED_BASE_URL}/checksums.txt" -o "${WORK_DIR}/librespeed-checksums.txt"
+(
+  cd "${WORK_DIR}"
+  grep " ${LIBRESPEED_ARCHIVE}\$" librespeed-checksums.txt | sha256sum -c -
+)
+tar -xzf "${WORK_DIR}/${LIBRESPEED_ARCHIVE}" -C "${WORK_DIR}"
+
 if ! id hy2panel >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/hy2panel --shell /usr/sbin/nologin hy2panel
 fi
@@ -71,12 +82,17 @@ install -d -o root -g hy2panel -m 750 /etc/hy2panel/certs
 install -d -o hy2panel -g hy2panel -m 750 /var/lib/hy2panel
 install -o root -g root -m 755 "${PANEL_BINARY}" /usr/local/bin/hy2panel
 install -o root -g root -m 755 "${WORK_DIR}/sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box" /usr/local/bin/sing-box
+install -o root -g root -m 755 "${WORK_DIR}/librespeed-cli" /usr/local/bin/librespeed-cli
 install -o root -g root -m 750 "${ROOT_DIR}/scripts/hy2panel-apply.sh" /usr/local/sbin/hy2panel-apply
+install -o root -g root -m 750 "${ROOT_DIR}/scripts/hy2panel-bbr.sh" /usr/local/sbin/hy2panel-bbr
 install -o root -g root -m 750 "${ROOT_DIR}/scripts/cert-deploy.sh" /usr/local/sbin/hy2panel-cert-deploy
+install -o root -g root -m 644 "${ROOT_DIR}/scripts/99-hy2panel.conf" /etc/hy2panel/99-hy2panel.conf
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel.service" /etc/systemd/system/hy2panel.service
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/sing-box.service" /etc/systemd/system/sing-box.service
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-apply.service" /etc/systemd/system/hy2panel-apply.service
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-apply.path" /etc/systemd/system/hy2panel-apply.path
+install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-bbr.service" /etc/systemd/system/hy2panel-bbr.service
+install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-bbr.path" /etc/systemd/system/hy2panel-bbr.path
 install -o root -g root -m 644 "${ROOT_DIR}/systemd/hy2panel-firewall.service" /etc/systemd/system/hy2panel-firewall.service
 install -D -o root -g root -m 750 "${ROOT_DIR}/scripts/cert-deploy.sh" /etc/letsencrypt/renewal-hooks/deploy/hy2panel
 
@@ -154,9 +170,10 @@ fi
 chmod 600 /etc/hy2panel/firewall.nft
 
 systemctl daemon-reload
-systemctl enable certbot.timer hy2panel-apply.path hy2panel-firewall.service hy2panel.service sing-box.service
+systemctl enable certbot.timer hy2panel-apply.path hy2panel-bbr.path hy2panel-firewall.service hy2panel.service sing-box.service
 systemctl start hy2panel-firewall.service
 systemctl start hy2panel-apply.path
+systemctl start hy2panel-bbr.path
 if ! /usr/local/sbin/hy2panel-apply; then
   printf 'sing-box 首次启动失败: %s\n' "$(< /etc/hy2panel/apply.result)" >&2
   exit 1
