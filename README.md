@@ -7,14 +7,17 @@
 ## 功能
 
 - VLESS Reality Vision 与 Hysteria2 配置、客户端链接和本地二维码
+- 节点配置与客户端接入使用互斥手风琴，展开一项时自动收起另一项
+- 按节点公网 IP 生成「国旗 + 协议」客户端名称，如 `🇺🇸 US-Reality`
 - 实时上下行速率、曲线、累计流量、CPU、内存、磁盘和运行时间
 - RackNerd 官方 API 月度流量展示，成功结果缓存 5 分钟
 - BBR + fq 状态展示和固定模板一键应用
-- LibreSpeed 按需测速，展示延迟、抖动、上下行和测试耗流
+- LibreSpeed 按需测速，展示延迟、抖动、上下行和测试耗流，测速期间实时显示网卡吞吐
 - Hairline 指针互动图形、浅色响应式界面
 - 节点配置预检、原子应用和启动失败回滚
 - 固定单元日志查看、凭据脱敏和逐项服务端自检
 - systemd 自动重启、每分钟监听检查及保守自动换端口
+- 面板内检查 GitHub 最新版本并安全一键升级，校验 SHA-256、失败自动回滚、保留现有配置
 - HTTPS、管理 IP 白名单、登录限流、HttpOnly/SameSite Strict 会话
 - 面板与 sing-box 非 root 运行，仅固定系统操作通过受控 root 单元执行
 
@@ -71,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新 Release。固定版本：
 
 ```bash
-export HY2PANEL_VERSION="v0.3.1"
+export HY2PANEL_VERSION="v0.4.0"
 ```
 
 ## RackNerd 流量配置
@@ -96,6 +99,31 @@ API 请求失败时，错误信息仅显示在管理面板。成功结果缓存 
 「系统设置」中的 BBR 按钮只应用项目内置的 `/etc/hy2panel/99-hy2panel.conf` 模板，不接收任意 sysctl 参数。BBR 主要优化 Reality 的 TCP 连接；Hysteria2 使用 QUIC 自有拥塞控制。
 
 测速使用 LibreSpeed CLI，默认 3 并发、下载和上传各 8 秒、禁用 ICMP、使用 HTTPS。只有点击「开始测速」才会运行，不会后台定时测速。测速会短暂占用网络并消耗套餐流量。
+
+LibreSpeed 返回的 `download`/`upload` 单位是 Mbps，面板直接按 Mbps 展示，不再换算为 bps。测速进行中，卡片会每秒读取 `/proc/net/dev` 计算实时网卡吞吐；该数值包含服务器上的其他连接，仅用于观察趋势，最终结果以 LibreSpeed 输出为准。
+
+## 节点命名与地理位置
+
+面板会解析节点地址的公网 IP，通过 `https://ipwho.is` 查询国家代码，并生成带国旗的客户端名称：
+
+```text
+🇺🇸 US-Reality
+🇺🇸 US-Hysteria2
+```
+
+查询结果缓存 24 小时，失败时缓存 10 分钟并回退为 `🌐 Reality` / `🌐 Hysteria2`。私网、回环、链路本地和 RFC 保留文档地址不会发起查询。该查询会把节点公网 IP 发送给第三方服务；如不希望外部查询，可忽略国旗名称，客户端链接和连接本身不依赖此功能。
+
+## 面板更新
+
+「系统设置 → 面板更新」会读取 GitHub Release 的最新标签，与当前版本比较后提示是否有更新。点击「一键升级」后：
+
+1. 面板写入 `/etc/hy2panel/upgrade.request`，由 `hy2panel-upgrade.path` 触发受控 root 单元
+2. 从最新 Release 下载 `hy2panel-bundle-linux-amd64.tar.gz` 及其 `.sha256`
+3. 校验失败立即停止，不修改现有文件
+4. 备份当前二进制、系统脚本和 systemd 单元后再安装
+5. 重新渲染并应用配置；任何一步失败都会回滚并重启旧版面板
+
+升级不会覆盖 `/etc/hy2panel/panel.json`，域名、密钥、UUID、密码和 RackNerd 凭据保持不变。升级完成后页面需要刷新一次。GitHub API 不可达时只显示错误，不会影响节点运行。
 
 ## 日志、自检与自动恢复
 

@@ -97,14 +97,20 @@ const trafficPercent = computed(() => racknerd.value.info?.percent_used || 0)
           <Gauge :size="20" class="muted-icon" />
         </div>
         <div v-if="speedtest.result && !speedtest.running" class="speed-results">
-          <div><ArrowDownToLine :size="18" /><span>下载</span><strong>{{ formatMbps(speedtest.result.download_bps) }}<small> Mbps</small></strong></div>
-          <div><ArrowUpFromLine :size="18" /><span>上传</span><strong>{{ formatMbps(speedtest.result.upload_bps) }}<small> Mbps</small></strong></div>
+          <div><ArrowDownToLine :size="18" /><span>下载</span><strong>{{ formatMbps(speedtest.result.download_mbps) }}<small> Mbps</small></strong></div>
+          <div><ArrowUpFromLine :size="18" /><span>上传</span><strong>{{ formatMbps(speedtest.result.upload_mbps) }}<small> Mbps</small></strong></div>
           <div class="latency-line"><span>延迟 {{ speedtest.result.ping.toFixed(1) }} ms</span><span>抖动 {{ speedtest.result.jitter.toFixed(1) }} ms</span></div>
           <small>{{ speedtest.result.server_name }} · 耗流 {{ formatBytes(speedtest.result.bytes_sent + speedtest.result.bytes_received) }}</small>
         </div>
+        <div v-else-if="speedtest.running" class="speed-results speed-live">
+          <div><ArrowDownToLine :size="18" /><span>实时下载吞吐</span><strong>{{ formatMbps(speedtest.live?.download_mbps) }}<small> Mbps</small></strong></div>
+          <div><ArrowUpFromLine :size="18" /><span>实时上传吞吐</span><strong>{{ formatMbps(speedtest.live?.upload_mbps) }}<small> Mbps</small></strong></div>
+          <div class="latency-line"><span class="live-dot">测速中</span><span>每秒更新</span></div>
+          <small>实时值包含其他连接，最终结果以 LibreSpeed 为准。</small>
+        </div>
         <div v-else class="speed-placeholder">
           <Zap :size="28" />
-          <p>{{ speedtest.running ? '正在测试下载与上传，请稍候…' : '按需测试 VPS 到 LibreSpeed 节点的网络质量。' }}</p>
+          <p>按需测试 VPS 到 LibreSpeed 节点的网络质量。</p>
         </div>
         <p v-if="speedtest.error && !speedtest.running" class="warning-text">{{ speedtest.error }}</p>
         <button class="primary-button full-button" :disabled="speedtest.running || starting" @click="emit('speedtest')">

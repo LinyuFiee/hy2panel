@@ -142,9 +142,29 @@ func sampleCPU(result *Status) {
 }
 
 func sampleNetwork(result *Status) {
+	rxTotal, txTotal, ok := networkTotals()
+	if !ok {
+		return
+	}
+	now := time.Now()
+	if !previous.networkTime.IsZero() {
+		elapsed := now.Sub(previous.networkTime).Seconds()
+		if elapsed > 0 && rxTotal >= previous.rxBytes && txTotal >= previous.txBytes {
+			result.RXBytesPerSecond = float64(rxTotal-previous.rxBytes) / elapsed
+			result.TXBytesPerSecond = float64(txTotal-previous.txBytes) / elapsed
+		}
+	}
+	result.RXTotalBytes = rxTotal
+	result.TXTotalBytes = txTotal
+	previous.rxBytes = rxTotal
+	previous.txBytes = txTotal
+	previous.networkTime = now
+}
+
+func networkTotals() (uint64, uint64, bool) {
 	data, err := os.ReadFile("/proc/net/dev")
 	if err != nil {
-		return
+		return 0, 0, false
 	}
 	var rxTotal, txTotal uint64
 	for _, line := range strings.Split(string(data), "\n") {
@@ -163,17 +183,5 @@ func sampleNetwork(result *Status) {
 			txTotal += tx
 		}
 	}
-	now := time.Now()
-	if !previous.networkTime.IsZero() {
-		elapsed := now.Sub(previous.networkTime).Seconds()
-		if elapsed > 0 && rxTotal >= previous.rxBytes && txTotal >= previous.txBytes {
-			result.RXBytesPerSecond = float64(rxTotal-previous.rxBytes) / elapsed
-			result.TXBytesPerSecond = float64(txTotal-previous.txBytes) / elapsed
-		}
-	}
-	result.RXTotalBytes = rxTotal
-	result.TXTotalBytes = txTotal
-	previous.rxBytes = rxTotal
-	previous.txBytes = txTotal
-	previous.networkTime = now
+	return rxTotal, txTotal, true
 }

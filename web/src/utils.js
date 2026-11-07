@@ -11,8 +11,8 @@ export function formatRate(value) {
 }
 
 export function formatMbps(value) {
-  const mbps = Number(value || 0) / 1_000_000
-  if (mbps >= 100) return mbps.toFixed(0)
+  const mbps = Number(value || 0)
+  if (mbps >= 100) return mbps.toFixed(1)
   if (mbps >= 10) return mbps.toFixed(1)
   return mbps.toFixed(2)
 }

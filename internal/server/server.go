@@ -34,6 +34,13 @@ type Server struct {
 	rackNerdCache    RackNerdView
 	rackNerdCachedAt time.Time
 	rackNerdTTL      time.Duration
+	nodeMetaClient   geoIPLookup
+	nodeMetaMu       sync.Mutex
+	nodeMetaCache    NodeMeta
+	nodeMetaHost     string
+	nodeMetaCachedAt time.Time
+	nodeMetaTTL      time.Duration
+	update           *UpdateManager
 }
 
 type stateResponse struct {
@@ -42,6 +49,8 @@ type stateResponse struct {
 	Status    Status            `json:"status"`
 	RackNerd  RackNerdView      `json:"racknerd"`
 	SpeedTest SpeedTestState    `json:"speedtest"`
+	NodeMeta  NodeMeta          `json:"node_meta"`
+	Update    UpdateView        `json:"update"`
 }
 
 type updateRequest struct {
@@ -58,6 +67,8 @@ func New(store *store.Store, applier Applier) *Server {
 		bbr:            FileBBRApplier{Dir: filepath.Dir(store.Path())},
 		speedtest:      NewSpeedTester(),
 		rackNerdClient: &racknerd.Client{},
+		nodeMetaClient: &geoIPClient{},
+		update:         NewUpdateManager(filepath.Dir(store.Path())),
 	}
 }
 
@@ -106,6 +117,8 @@ func (s *Server) routes(prefix netip.Prefix) http.Handler {
 	mux.Handle("POST /api/settings/recovery", s.requireAuth(http.HandlerFunc(s.updateRecovery)))
 	mux.Handle("GET /api/logs", s.requireAuth(http.HandlerFunc(s.logs)))
 	mux.Handle("POST /api/diagnostics", s.requireAuth(http.HandlerFunc(s.diagnostics)))
+	mux.Handle("POST /api/update/check", s.requireAuth(http.HandlerFunc(s.checkUpdate)))
+	mux.Handle("POST /api/update/apply", s.requireAuth(http.HandlerFunc(s.applyUpdate)))
 	mux.Handle("POST /api/bbr", s.requireAuth(http.HandlerFunc(s.applyBBR)))
 	mux.Handle("POST /api/speedtest", s.requireAuth(http.HandlerFunc(s.startSpeedTest)))
 	mux.Handle("GET /", http.FileServer(http.FS(panelweb.Dist())))

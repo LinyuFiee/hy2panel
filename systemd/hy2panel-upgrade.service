@@ -1,0 +1,13 @@
+[Unit]
+Description=Download and apply a verified hy2panel update
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-upgrade
+TimeoutStartSec=600s
+PrivateTmp=true
+ProtectHome=true

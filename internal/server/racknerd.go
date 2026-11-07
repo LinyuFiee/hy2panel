@@ -102,11 +102,14 @@ func (s *Server) updateRackNerd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) makeState(ctx context.Context, cfg *config.Config) stateResponse {
+	meta := s.nodeMeta(ctx, cfg.Panel.PublicHost)
 	return stateResponse{
 		Config:    cfg.Public(),
-		Links:     cfg.ClientLinks(),
+		Links:     namedClientLinks(cfg.ClientLinks(), meta),
 		Status:    readStatus(ctx),
 		RackNerd:  s.rackNerdState(ctx, cfg),
 		SpeedTest: s.speedtest.State(),
+		NodeMeta:  meta,
+		Update:    s.update.State(),
 	}
 }

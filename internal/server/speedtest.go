@@ -18,14 +18,20 @@ type SpeedTestResult struct {
 	ServerName    string    `json:"server_name"`
 	Ping          float64   `json:"ping"`
 	Jitter        float64   `json:"jitter"`
-	DownloadBps   float64   `json:"download_bps"`
-	UploadBps     float64   `json:"upload_bps"`
+	DownloadMbps  float64   `json:"download_mbps"`
+	UploadMbps    float64   `json:"upload_mbps"`
 	BytesSent     uint64    `json:"bytes_sent"`
 	BytesReceived uint64    `json:"bytes_received"`
 }
 
+type SpeedTestLive struct {
+	DownloadMbps float64 `json:"download_mbps"`
+	UploadMbps   float64 `json:"upload_mbps"`
+}
+
 type SpeedTestState struct {
 	Running bool             `json:"running"`
+	Live    *SpeedTestLive   `json:"live,omitempty"`
 	Result  *SpeedTestResult `json:"result,omitempty"`
 	Error   string           `json:"error,omitempty"`
 }
@@ -33,6 +39,7 @@ type SpeedTestState struct {
 type SpeedTester struct {
 	mu        sync.Mutex
 	running   bool
+	live      *SpeedTestLive
 	result    *SpeedTestResult
 	lastError string
 	binary    string
@@ -52,6 +59,7 @@ func (t *SpeedTester) Start() bool {
 		return false
 	}
 	t.running = true
+	t.live = nil
 	t.lastError = ""
 	t.mu.Unlock()
 	go func() {
@@ -61,6 +69,7 @@ func (t *SpeedTester) Start() bool {
 		t.mu.Lock()
 		defer t.mu.Unlock()
 		t.running = false
+		t.live = nil
 		if err != nil {
 			t.lastError = err.Error()
 			return
@@ -75,6 +84,10 @@ func (t *SpeedTester) State() SpeedTestState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	state := SpeedTestState{Running: t.running, Error: t.lastError}
+	if t.live != nil {
+		live := *t.live
+		state.Live = &live
+	}
 	if t.result != nil {
 		result := *t.result
 		state.Result = &result
@@ -87,17 +100,50 @@ func (t *SpeedTester) execute(ctx context.Context) (SpeedTestResult, error) {
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
-	if err := command.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if len(message) > 1000 {
-			message = message[:1000]
-		}
-		if message == "" {
-			message = err.Error()
-		}
-		return SpeedTestResult{}, fmt.Errorf("测速失败: %s", message)
+	if err := command.Start(); err != nil {
+		return SpeedTestResult{}, fmt.Errorf("无法启动测速工具: %w", err)
 	}
-	return parseSpeedTest(stdout.Bytes())
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var previousRX, previousTX uint64
+	previousTime := time.Now()
+	if rx, tx, ok := networkTotals(); ok {
+		previousRX, previousTX = rx, tx
+	}
+	for {
+		select {
+		case err := <-done:
+			if err != nil {
+				message := strings.TrimSpace(stderr.String())
+				if len(message) > 1000 {
+					message = message[:1000]
+				}
+				if message == "" {
+					message = err.Error()
+				}
+				return SpeedTestResult{}, fmt.Errorf("测速失败: %s", message)
+			}
+			return parseSpeedTest(stdout.Bytes())
+		case now := <-ticker.C:
+			rx, tx, ok := networkTotals()
+			if !ok {
+				continue
+			}
+			elapsed := now.Sub(previousTime).Seconds()
+			if elapsed > 0 && rx >= previousRX && tx >= previousTX {
+				t.updateLive(float64(rx-previousRX)*8/elapsed/1_000_000, float64(tx-previousTX)*8/elapsed/1_000_000)
+			}
+			previousRX, previousTX, previousTime = rx, tx, now
+		}
+	}
+}
+
+func (t *SpeedTester) updateLive(download, upload float64) {
+	t.mu.Lock()
+	t.live = &SpeedTestLive{DownloadMbps: download, UploadMbps: upload}
+	t.mu.Unlock()
 }
 
 type speedTestPayload struct {
@@ -145,12 +191,13 @@ func parseSpeedTest(output []byte) (SpeedTestResult, error) {
 		ServerName:    payload.Server.Name,
 		Ping:          payload.Ping,
 		Jitter:        payload.Jitter,
-		DownloadBps:   payload.Download,
-		UploadBps:     payload.Upload,
+		DownloadMbps:  payload.Download,
+		UploadMbps:    payload.Upload,
 		BytesSent:     payload.BytesSent,
 		BytesReceived: payload.BytesReceived,
 	}, nil
 }
+
 func (s *Server) startSpeedTest(w http.ResponseWriter, r *http.Request) {
 	if !validMutation(r) {
 		writeError(w, http.StatusForbidden, "请求来源无效")

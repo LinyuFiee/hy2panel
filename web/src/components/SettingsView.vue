@@ -1,12 +1,12 @@
 <script setup>
 import { ref } from 'vue'
-import { CheckCircle2, CloudCog, Database, KeyRound, LockKeyhole, RotateCcw, ShieldCheck, Trash2, Zap } from '@lucide/vue'
+import { CheckCircle2, CloudCog, Database, Download, ExternalLink, KeyRound, LockKeyhole, RefreshCw, RotateCcw, ShieldCheck, Trash2, Zap } from '@lucide/vue'
 
 const props = defineProps({
   state: { type: Object, required: true },
   busy: { type: Object, required: true }
 })
-const emit = defineEmits(['save-racknerd', 'clear-racknerd', 'apply-bbr'])
+const emit = defineEmits(['save-racknerd', 'clear-racknerd', 'apply-bbr', 'check-update', 'apply-update'])
 const apiKey = ref('')
 const apiHash = ref('')
 
@@ -50,6 +50,26 @@ defineExpose({ clearCredentials })
       </div>
         <p class="field-help">仅应用固定模板，不执行来自浏览器的任意系统命令。Hysteria2 不受 BBR 直接加速。</p>
       <button class="secondary-button" :disabled="busy.bbr" @click="emit('apply-bbr')"><RotateCcw :size="16" />{{ busy.bbr ? '正在应用…' : '应用 BBR + fq' }}</button>
+    </section>
+
+    <section class="panel-card update-card">
+      <div class="settings-heading">
+        <div class="protocol-icon mint"><Download :size="22" /></div>
+        <div><h3>面板更新</h3><p>从 LinyuFiee/hy2panel 官方 Release 检测并校验更新。</p></div>
+        <span v-if="state.update?.available" class="status-pill ok">发现新版本</span>
+      </div>
+      <div class="setting-readout">
+        <div><span>当前版本</span><strong>v{{ state.update?.current_version || '未知' }}</strong></div>
+        <div><span>最新版本</span><strong>{{ state.update?.latest_version ? `v${state.update.latest_version}` : '尚未检测' }}</strong></div>
+      </div>
+      <div class="button-row">
+        <button class="secondary-button" :disabled="state.update?.checking || state.update?.updating" @click="emit('check-update')"><RefreshCw :size="16" :class="{ spin: state.update?.checking }" />{{ state.update?.checking ? '正在检测…' : '检测更新' }}</button>
+        <button v-if="state.update?.available" class="primary-button" :disabled="state.update?.updating" @click="emit('apply-update')"><Download :size="16" />{{ state.update?.updating ? '正在更新…' : '立即更新' }}</button>
+        <a v-if="state.update?.release_url" class="secondary-button link-button" :href="state.update.release_url" target="_blank" rel="noopener noreferrer">Release <ExternalLink :size="14" /></a>
+      </div>
+      <p v-if="state.update?.message" class="field-help update-message">{{ state.update.message }}</p>
+      <p v-if="state.update?.error" class="warning-text">{{ state.update.error }}</p>
+      <p class="field-help">升级包强制校验 SHA-256，失败自动回滚。更新时面板会短暂重启，不会覆盖节点配置。</p>
     </section>
 
     <section class="panel-card security-card">

@@ -20,7 +20,7 @@ const networkSamples = ref([])
 const diagnosticReport = ref(null)
 const logEntries = ref([])
 const logUnit = ref('sing-box')
-const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false })
+const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false, updateCheck: false, updating: false })
 const form = reactive({
   public_host: '',
   reality: { enabled: true, port: 443, server_name: 'www.microsoft.com', uuid: '', private_key: '', public_key: '', short_id: '' },
@@ -243,6 +243,33 @@ async function updateRecovery(autoPort) {
   }
 }
 
+async function checkUpdates() {
+  busy.updateCheck = true
+  error.value = ''
+  try {
+    state.value.update = await request('/api/update/check', { method: 'POST', body: '{}' })
+    showNotice(state.value.update.available ? `发现新版本 v${state.value.update.latest_version}` : '当前已经是最新版本')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.updateCheck = false
+  }
+}
+
+async function applyUpdate() {
+  if (!window.confirm('更新会短暂重启面板，但会保留节点配置。确定继续吗？')) return
+  busy.updating = true
+  error.value = ''
+  try {
+    state.value.update = await request('/api/update/apply', { method: 'POST', body: '{}' })
+    showNotice('更新已开始，完成后请刷新页面')
+  } catch (failure) {
+    error.value = failure.message
+  } finally {
+    busy.updating = false
+  }
+}
+
 async function copyLink(name) {
   const link = state.value?.links[name]
   if (!link) return
@@ -314,9 +341,9 @@ onBeforeUnmount(() => {
       <div v-if="error" class="alert error-alert">{{ error }}</div>
       <div v-if="notice" class="alert success-alert">{{ notice }}</div>
       <DashboardView v-if="activeTab === 'dashboard'" :state="state" :samples="networkSamples" :starting="busy.speedtest" @speedtest="startSpeedTest" @settings="switchTab('settings')" />
-      <NodesView v-else-if="activeTab === 'nodes'" :form="form" :links="state.links" :saving="busy.nodes" :copied="copied" @save="saveNodes" @copy="copyLink" />
+      <NodesView v-else-if="activeTab === 'nodes'" :form="form" :links="state.links" :meta="state.node_meta" :saving="busy.nodes" :copied="copied" @save="saveNodes" @copy="copyLink" />
       <MaintenanceView v-else-if="activeTab === 'maintenance'" :state="state" :report="diagnosticReport" :entries="logEntries" :log-unit="logUnit" :busy="busy" @diagnostics="runDiagnostics" @logs="loadLogs" @recovery="updateRecovery" />
-      <SettingsView v-else ref="settingsRef" :state="state" :busy="busy" @save-racknerd="saveRackNerd" @clear-racknerd="clearRackNerd" @apply-bbr="applyBBR" />
+      <SettingsView v-else ref="settingsRef" :state="state" :busy="busy" @save-racknerd="saveRackNerd" @clear-racknerd="clearRackNerd" @apply-bbr="applyBBR" @check-update="checkUpdates" @apply-update="applyUpdate" />
     </main>
   </div>
 </template>

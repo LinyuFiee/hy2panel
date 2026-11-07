@@ -37,7 +37,7 @@ jobs:
           go test ./...
           go vet ./...
       - name: Check scripts
-        run: bash -n scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/cert-deploy.sh scripts/bootstrap.sh
+        run: bash -n scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/hy2panel-upgrade.sh scripts/cert-deploy.sh scripts/bootstrap.sh
       - name: Build Linux binary
         env:
           CGO_ENABLED: 0
@@ -48,8 +48,8 @@ jobs:
         run: |
           mkdir -p release/bundle/dist release/bundle/scripts release/bundle/systemd
           cp dist/hy2panel-linux-amd64 release/bundle/dist/
-          cp scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/cert-deploy.sh scripts/99-hy2panel.conf release/bundle/scripts/
-          cp systemd/hy2panel.service systemd/hy2panel-firewall.service systemd/hy2panel-apply.path systemd/hy2panel-apply.service systemd/hy2panel-bbr.path systemd/hy2panel-bbr.service systemd/hy2panel-watchdog.service systemd/hy2panel-watchdog.timer systemd/sing-box.service release/bundle/systemd/
+          cp scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/hy2panel-upgrade.sh scripts/cert-deploy.sh scripts/99-hy2panel.conf release/bundle/scripts/
+          cp systemd/hy2panel.service systemd/hy2panel-firewall.service systemd/hy2panel-apply.path systemd/hy2panel-apply.service systemd/hy2panel-bbr.path systemd/hy2panel-bbr.service systemd/hy2panel-watchdog.service systemd/hy2panel-watchdog.timer systemd/hy2panel-upgrade.path systemd/hy2panel-upgrade.service systemd/sing-box.service release/bundle/systemd/
           tar -czf release/hy2panel-bundle-linux-amd64.tar.gz -C release/bundle .
           cd release
           sha256sum hy2panel-bundle-linux-amd64.tar.gz > hy2panel-bundle-linux-amd64.tar.gz.sha256

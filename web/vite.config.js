@@ -24,8 +24,11 @@ const mockState = {
   },
   speedtest: {
     running: false,
-    result: { timestamp: '2026-11-07T10:00:00Z', server_name: 'San Jose · LibreSpeed', ping: 18.6, jitter: 1.4, download_bps: 683000000, upload_bps: 412000000, bytes_sent: 200000000, bytes_received: 600000000 }
-  }
+    live: null,
+    result: { timestamp: '2026-11-07T10:00:00Z', server_name: 'San Jose · LibreSpeed', ping: 18.6, jitter: 1.4, download_mbps: 683, upload_mbps: 412, bytes_sent: 200000000, bytes_received: 600000000 }
+  },
+  node_meta: { country_code: 'US', country_name: 'United States', flag: '🇺🇸', reality_name: '🇺🇸 US-Reality', hysteria2_name: '🇺🇸 US-Hysteria2' },
+  update: { current_version: '0.4.0', latest_version: '0.4.0', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
 }
 
 let mockTick = 0
@@ -65,10 +68,32 @@ export default defineConfig({
             res.end(JSON.stringify(mockState))
             return
           }
+          if (req.url === '/api/update/check') {
+            mockState.update.latest_version = '0.5.0'
+            mockState.update.available = true
+            res.end(JSON.stringify(mockState.update))
+            return
+          }
+          if (req.url === '/api/update/apply') {
+            mockState.update.updating = true
+            mockState.update.message = '正在下载并校验更新，面板将短暂重启'
+            res.end(JSON.stringify(mockState.update))
+            setTimeout(() => {
+              mockState.update.updating = false
+              mockState.update.available = false
+              mockState.update.current_version = '0.5.0'
+              mockState.update.message = '更新完成，请刷新页面'
+            }, 2000)
+            return
+          }
           if (req.url === '/api/speedtest') {
             mockState.speedtest.running = true
-            res.end(JSON.stringify({ running: true }))
-            setTimeout(() => { mockState.speedtest.running = false }, 3000)
+            mockState.speedtest.live = { download_mbps: 512.4, upload_mbps: 128.2 }
+            res.end(JSON.stringify({ running: true, live: mockState.speedtest.live }))
+            setTimeout(() => {
+              mockState.speedtest.running = false
+              mockState.speedtest.live = null
+            }, 3000)
             return
           }
           if (req.url === '/api/state') {

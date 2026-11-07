@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for verified hy2panel update requests
+
+[Path]
+PathExists=/etc/hy2panel/upgrade.request
+Unit=hy2panel-upgrade.service
+
+[Install]
+WantedBy=multi-user.target
