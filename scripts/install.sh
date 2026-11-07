@@ -132,6 +132,9 @@ ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '\n')"
 printf '%s' "${ADMIN_PASSWORD}" | /usr/local/bin/hy2panel init --config /etc/hy2panel/panel.json --panel-domain "${PANEL_DOMAIN}" --hy2-domain "${HY2_DOMAIN}" --public-host "${PUBLIC_HOST}" --admin-ip "${ADMIN_IP}"
 chown hy2panel:hy2panel /etc/hy2panel/panel.json
 chmod 600 /etc/hy2panel/panel.json
+install -o root -g root -m 600 /dev/null /root/hy2panel-credentials
+printf '面板地址: https://%s:8443\n管理白名单: %s\n管理员密码: %s\n' "${PANEL_DOMAIN}" "${ADMIN_IP}" "${ADMIN_PASSWORD}" > /root/hy2panel-credentials
+chmod 600 /root/hy2panel-credentials
 /usr/local/bin/hy2panel render --config /etc/hy2panel/panel.json --output /etc/hy2panel/sing-box.pending.json
 chown hy2panel:hy2panel /etc/hy2panel/sing-box.pending.json
 
@@ -162,9 +165,6 @@ systemctl start hy2panel.service
 systemctl is-active --quiet hy2panel.service
 systemctl is-active --quiet sing-box.service
 
-install -o root -g root -m 600 /dev/null /root/hy2panel-credentials
-printf '面板地址: https://%s:8443\n管理白名单: %s\n管理员密码: %s\n' "${PANEL_DOMAIN}" "${ADMIN_IP}" "${ADMIN_PASSWORD}" > /root/hy2panel-credentials
-chmod 600 /root/hy2panel-credentials
 
 printf '\n安装完成。\n面板: https://%s:8443\n凭据文件: /root/hy2panel-credentials\n' "${PANEL_DOMAIN}"
 sysctl net.ipv4.tcp_congestion_control net.core.default_qdisc
