@@ -6,6 +6,7 @@ import NodesView from './components/NodesView.vue'
 import MaintenanceView from './components/MaintenanceView.vue'
 import SettingsView from './components/SettingsView.vue'
 import HairlineFigure from './components/HairlineFigure.vue'
+import GithubIcon from './components/GithubIcon.vue'
 
 const view = ref('loading')
 const activeTab = ref('dashboard')
@@ -329,6 +330,7 @@ onBeforeUnmount(() => {
       </nav>
       <div class="sidebar-bottom">
         <div class="sidebar-status"><Activity :size="16" /><div><strong :class="state.status.sing_box === 'active' ? 'text-green' : 'text-red'">{{ state.status.sing_box === 'active' ? '服务运行正常' : '服务需要检查' }}</strong><span>{{ panelAddress }}</span></div></div>
+        <a class="github-link" href="https://github.com/LinyuFiee/hy2panel" target="_blank" rel="noopener noreferrer"><GithubIcon :size="16" />GitHub</a>
         <button class="logout-button" @click="logout"><LogOut :size="17" />退出登录</button>
       </div>
     </aside>

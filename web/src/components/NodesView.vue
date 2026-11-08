@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { Check, ChevronDown, Clipboard, Globe2, KeyRound, Radio, Save, ShieldCheck } from '@lucide/vue'
 import QRCode from 'qrcode'
 
@@ -13,8 +13,13 @@ const props = defineProps({
 const emit = defineEmits(['save', 'copy'])
 const realityName = computed(() => props.meta.reality_name || 'VLESS Reality')
 const hysteria2Name = computed(() => props.meta.hysteria2_name || 'Hysteria2')
+const openSection = ref('')
 const qr = reactive({ reality: '', hysteria2: '' })
 const previousLinks = {}
+
+function toggleSection(id) {
+  openSection.value = openSection.value === id ? '' : id
+}
 
 watch(() => props.links, async links => {
   for (const name of ['reality', 'hysteria2']) {
@@ -47,8 +52,8 @@ watch(() => props.links, async links => {
           <label>TCP 端口<input v-model.number="form.reality.port" type="number" min="1" max="65535" required /></label>
           <label>伪装 SNI<input v-model.trim="form.reality.server_name" required /></label>
         </div>
-        <details class="advanced-block" name="protocol-config">
-          <summary><ChevronDown :size="15" />身份与密钥</summary>
+        <details class="advanced-block" :open="openSection === 'reality-config'">
+          <summary @click.prevent="toggleSection('reality-config')"><ChevronDown :size="15" />身份与密钥</summary>
           <label>UUID<input v-model.trim="form.reality.uuid" required /></label>
           <label>Reality 私钥<input v-model.trim="form.reality.private_key" type="password" autocomplete="off" required /></label>
           <label>Reality 公钥<input v-model.trim="form.reality.public_key" readonly required /></label>
@@ -66,8 +71,8 @@ watch(() => props.links, async links => {
           <label>UDP 端口<input v-model.number="form.hysteria2.port" type="number" min="1" max="65535" required /></label>
           <label>证书域名<input v-model="form.hysteria2.domain" readonly /></label>
         </div>
-        <details class="advanced-block" name="protocol-config">
-          <summary><ChevronDown :size="15" />密码与带宽</summary>
+        <details class="advanced-block" :open="openSection === 'hysteria2-config'">
+          <summary @click.prevent="toggleSection('hysteria2-config')"><ChevronDown :size="15" />密码与带宽</summary>
           <label>连接密码<input v-model.trim="form.hysteria2.password" type="password" autocomplete="off" required /></label>
           <div class="form-row">
             <label>服务器上传 Mbps<input v-model.number="form.hysteria2.up_mbps" type="number" min="1" max="10000" required /></label>
@@ -87,8 +92,8 @@ watch(() => props.links, async links => {
       <div class="link-grid">
         <article v-for="(link, name) in links" :key="name" class="client-link">
           <div><strong>{{ name === 'reality' ? realityName : hysteria2Name }}</strong><button class="icon-text-button" type="button" @click="emit('copy', name)"><Check v-if="copied === name" :size="15" /><Clipboard v-else :size="15" />{{ copied === name ? '已复制' : '复制' }}</button></div>
-          <details name="client-access">
-            <summary>显示链接与二维码</summary>
+          <details :open="openSection === `link-${name}`">
+            <summary @click.prevent="toggleSection(`link-${name}`)">显示链接与二维码</summary>
             <textarea :value="link" readonly rows="4" @focus="$event.target.select()"></textarea>
             <img v-if="qr[name]" :src="qr[name]" :alt="`${name} 客户端二维码`" />
           </details>

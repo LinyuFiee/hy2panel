@@ -65,6 +65,7 @@ defineExpose({ clearCredentials })
       <div class="button-row">
         <button class="secondary-button" :disabled="state.update?.checking || state.update?.updating" @click="emit('check-update')"><RefreshCw :size="16" :class="{ spin: state.update?.checking }" />{{ state.update?.checking ? '正在检测…' : '检测更新' }}</button>
         <button v-if="state.update?.available" class="primary-button" :disabled="state.update?.updating" @click="emit('apply-update')"><Download :size="16" />{{ state.update?.updating ? '正在更新…' : '立即更新' }}</button>
+        <a class="secondary-button link-button" href="https://github.com/LinyuFiee/hy2panel" target="_blank" rel="noopener noreferrer">GitHub <ExternalLink :size="14" /></a>
         <a v-if="state.update?.release_url" class="secondary-button link-button" :href="state.update.release_url" target="_blank" rel="noopener noreferrer">Release <ExternalLink :size="14" /></a>
       </div>
       <p v-if="state.update?.message" class="field-help update-message">{{ state.update.message }}</p>
