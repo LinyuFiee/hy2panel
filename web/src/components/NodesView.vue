@@ -1,6 +1,6 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
-import { Check, ChevronDown, Clipboard, Globe2, KeyRound, Radio, Save, ShieldCheck } from '@lucide/vue'
+import { computed, reactive, watch } from 'vue'
+import { Check, Clipboard, Globe2, KeyRound, Radio, Save, ShieldCheck } from '@lucide/vue'
 import QRCode from 'qrcode'
 
 const props = defineProps({
@@ -13,13 +13,8 @@ const props = defineProps({
 const emit = defineEmits(['save', 'copy'])
 const realityName = computed(() => props.meta.reality_name || 'VLESS Reality')
 const hysteria2Name = computed(() => props.meta.hysteria2_name || 'Hysteria2')
-const openSection = ref('')
 const qr = reactive({ reality: '', hysteria2: '' })
 const previousLinks = {}
-
-function toggleSection(id) {
-  openSection.value = openSection.value === id ? '' : id
-}
 
 watch(() => props.links, async links => {
   for (const name of ['reality', 'hysteria2']) {
@@ -42,64 +37,75 @@ watch(() => props.links, async links => {
     </section>
 
     <div class="node-grid">
-      <section class="panel-card node-card">
+      <section class="panel-card node-card reality-card">
         <div class="node-heading">
           <div class="protocol-icon reality-icon"><ShieldCheck :size="22" /></div>
           <div><h3>{{ realityName }}</h3><p>TCP + Vision · 稳定主力</p></div>
-          <label class="toggle"><input v-model="form.reality.enabled" type="checkbox" /><span></span></label>
+          <label class="toggle"><input v-model="form.reality.enabled" type="checkbox" aria-label="启用 Reality" /><span></span></label>
         </div>
-        <div class="form-row">
-          <label>TCP 端口<input v-model.number="form.reality.port" type="number" min="1" max="65535" required /></label>
-          <label>伪装 SNI<input v-model.trim="form.reality.server_name" required /></label>
+
+        <div class="config-section">
+          <span class="config-title">连接设置</span>
+          <div class="form-row">
+            <label>TCP 端口<input v-model.number="form.reality.port" type="number" min="1" max="65535" required /></label>
+            <label>伪装 SNI<input v-model.trim="form.reality.server_name" required /></label>
+          </div>
         </div>
-        <details class="advanced-block" :open="openSection === 'reality-config'">
-          <summary @click.prevent="toggleSection('reality-config')"><ChevronDown :size="15" />身份与密钥</summary>
+
+        <div class="config-section">
+          <span class="config-title">身份与密钥</span>
           <label>UUID<input v-model.trim="form.reality.uuid" required /></label>
           <label>Reality 私钥<input v-model.trim="form.reality.private_key" type="password" autocomplete="off" required /></label>
           <label>Reality 公钥<input v-model.trim="form.reality.public_key" readonly required /></label>
           <label>Short ID<input v-model.trim="form.reality.short_id" required /></label>
-        </details>
+        </div>
+
+        <div class="client-section">
+          <div class="client-heading"><KeyRound :size="16" /><span>客户端接入</span><button v-if="links.reality" class="icon-text-button" type="button" @click="emit('copy', 'reality')"><Check v-if="copied === 'reality'" :size="15" /><Clipboard v-else :size="15" />{{ copied === 'reality' ? '已复制' : '复制链接' }}</button></div>
+          <textarea v-if="links.reality" :value="links.reality" readonly rows="3" class="link-text" aria-label="Reality 客户端链接" @focus="$event.target.select()"></textarea>
+          <p v-else class="access-empty">保存并应用后生成客户端链接。</p>
+          <div class="qr-wrap"><img v-if="qr.reality" :src="qr.reality" alt="Reality 客户端二维码" /><span v-else class="qr-empty">暂无二维码</span></div>
+          <p class="access-note">使用支持 VLESS Reality 的客户端扫码或复制链接导入</p>
+        </div>
       </section>
 
-      <section class="panel-card node-card">
+      <section class="panel-card node-card hy2-card">
         <div class="node-heading">
           <div class="protocol-icon hy2-icon"><Radio :size="22" /></div>
           <div><h3>{{ hysteria2Name }}</h3><p>UDP + QUIC · 弱网备选</p></div>
-          <label class="toggle"><input v-model="form.hysteria2.enabled" type="checkbox" /><span></span></label>
+          <label class="toggle"><input v-model="form.hysteria2.enabled" type="checkbox" aria-label="启用 Hysteria2" /><span></span></label>
         </div>
-        <div class="form-row">
-          <label>UDP 端口<input v-model.number="form.hysteria2.port" type="number" min="1" max="65535" required /></label>
-          <label>证书域名<input v-model="form.hysteria2.domain" readonly /></label>
+
+        <div class="config-section">
+          <span class="config-title">连接</span>
+          <div class="form-row">
+            <label>UDP 端口<input v-model.number="form.hysteria2.port" type="number" min="1" max="65535" required /></label>
+            <label>证书域名<input v-model="form.hysteria2.domain" readonly /></label>
+          </div>
         </div>
-        <details class="advanced-block" :open="openSection === 'hysteria2-config'">
-          <summary @click.prevent="toggleSection('hysteria2-config')"><ChevronDown :size="15" />密码与带宽</summary>
+
+        <div class="config-section">
+          <span class="config-title">认证与带宽</span>
           <label>连接密码<input v-model.trim="form.hysteria2.password" type="password" autocomplete="off" required /></label>
           <div class="form-row">
             <label>服务器上传 Mbps<input v-model.number="form.hysteria2.up_mbps" type="number" min="1" max="10000" required /></label>
             <label>服务器下载 Mbps<input v-model.number="form.hysteria2.down_mbps" type="number" min="1" max="10000" required /></label>
           </div>
-        </details>
+        </div>
+
+        <div class="client-section">
+          <div class="client-heading"><KeyRound :size="16" /><span>客户端接入</span><button v-if="links.hysteria2" class="icon-text-button" type="button" @click="emit('copy', 'hysteria2')"><Check v-if="copied === 'hysteria2'" :size="15" /><Clipboard v-else :size="15" />{{ copied === 'hysteria2' ? '已复制' : '复制链接' }}</button></div>
+          <textarea v-if="links.hysteria2" :value="links.hysteria2" readonly rows="3" class="link-text" @focus="$event.target.select()" aria-label="Hysteria2 客户端链接"></textarea>
+          <p v-else class="access-empty">保存并应用后生成客户端链接。</p>
+          <div class="qr-wrap"><img v-if="qr.hysteria2" :src="qr.hysteria2" alt="Hysteria2 客户端二维码" /><span v-else class="qr-empty">暂无二维码</span></div>
+          <p class="access-note">使用支持 Hysteria2 的客户端扫码或复制链接导入</p>
+        </div>
       </section>
     </div>
 
     <div class="save-bar">
-      <p>保存时先校验，启动失败自动恢复上一版配置。</p>
+      <p>保存时先校验，启动失败自动恢复上一版配置。链接包含完整凭据，请勿公开分享。</p>
       <button class="primary-button" type="submit" :disabled="saving"><Save :size="16" />{{ saving ? '正在应用…' : '保存并应用' }}</button>
     </div>
-
-    <section v-if="Object.keys(links).length" class="panel-card">
-      <div class="panel-heading"><div><span class="section-kicker">CLIENT ACCESS</span><h3>客户端链接与二维码</h3></div><KeyRound :size="20" class="muted-icon" /></div>
-      <div class="link-grid">
-        <article v-for="(link, name) in links" :key="name" class="client-link">
-          <div><strong>{{ name === 'reality' ? realityName : hysteria2Name }}</strong><button class="icon-text-button" type="button" @click="emit('copy', name)"><Check v-if="copied === name" :size="15" /><Clipboard v-else :size="15" />{{ copied === name ? '已复制' : '复制' }}</button></div>
-          <details :open="openSection === `link-${name}`">
-            <summary @click.prevent="toggleSection(`link-${name}`)">显示链接与二维码</summary>
-            <textarea :value="link" readonly rows="4" @focus="$event.target.select()"></textarea>
-            <img v-if="qr[name]" :src="qr[name]" :alt="`${name} 客户端二维码`" />
-          </details>
-        </article>
-      </div>
-      <p class="security-note">链接包含完整连接凭据，二维码仅在本地浏览器生成，请勿公开分享。</p>
-    </section>
   </form>
 </template>

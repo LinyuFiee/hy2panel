@@ -26,24 +26,32 @@ test('dashboard renders metrics and Hairline without runtime errors', async ({ p
   await page.screenshot({ path: '../docs/images/dashboard.png', fullPage: true })
 })
 
+async function qrCodesReady(page) {
+  return page.locator('.qr-wrap img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0))
+}
+
 test('node configuration and client links are accessible', async ({ page }) => {
   await openDashboard(page)
   await page.getByRole('button', { name: '节点管理', exact: true }).click()
   await expect(page.getByRole('heading', { name: '🇺🇸 US-Reality', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '🇺🇸 US-Hysteria2', exact: true })).toBeVisible()
-  const protocolDetails = page.locator('.advanced-block')
-  await page.getByText('身份与密钥', { exact: true }).click()
+  await expect(page.locator('.node-card details')).toHaveCount(0)
   await expect(page.getByLabel('UUID', { exact: true })).toBeVisible()
-  await page.getByText('密码与带宽', { exact: true }).click()
-  await expect(protocolDetails.nth(0)).not.toHaveAttribute('open', '')
-  await expect(protocolDetails.nth(1)).toHaveAttribute('open', '')
-  const clientDetails = page.locator('.client-link details')
-  await clientDetails.nth(0).locator('summary').click()
-  await expect(protocolDetails.nth(1)).not.toHaveAttribute('open', '')
-  await clientDetails.nth(1).locator('summary').click()
-  await expect(clientDetails.nth(0)).not.toHaveAttribute('open', '')
-  await expect(clientDetails.nth(1)).toHaveAttribute('open', '')
+  await expect(page.getByLabel('Reality 私钥', { exact: true })).toHaveAttribute('type', 'password')
+  await expect(page.getByLabel('连接密码', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Reality 客户端链接', { exact: true })).toHaveValue(/^vless:\/\//)
+  await expect(page.getByLabel('Hysteria2 客户端链接', { exact: true })).toHaveValue(/^hysteria2:\/\//)
+  const qrCodes = page.locator('.qr-wrap img')
+  await expect(qrCodes).toHaveCount(2)
+  await expect(qrCodes.first()).toBeVisible()
+  await expect(qrCodes.nth(1)).toBeVisible()
+  expect(await qrCodesReady(page)).toBe(true)
+  await page.getByRole('button', { name: '复制链接', exact: true }).first().click()
+  await expect(page.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
   await page.screenshot({ path: '../docs/images/nodes.png', fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
+  expect(overflow).toBe(false)
 })
 
 test('settings expose RackNerd and BBR controls', async ({ page }) => {

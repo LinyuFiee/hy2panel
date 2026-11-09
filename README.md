@@ -7,7 +7,7 @@
 ## 功能
 
 - VLESS Reality Vision 与 Hysteria2 配置、客户端链接和本地二维码
-- 节点配置与客户端接入使用互斥手风琴，展开一项时自动收起另一项
+- 节点配置、客户端链接和二维码按协议集中展示，无需展开或切换
 - 按节点公网 IP 生成「国旗 + 协议」客户端名称，如 `🇺🇸 US-Reality`
 - 实时上下行速率、曲线、累计流量、CPU、内存、磁盘和运行时间
 - RackNerd 官方 API 月度流量展示，成功结果缓存 5 分钟
@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新 Release。固定版本：
 
 ```bash
-export HY2PANEL_VERSION="v0.4.0"
+export HY2PANEL_VERSION="v0.4.2"
 ```
 
 ## RackNerd 流量配置
