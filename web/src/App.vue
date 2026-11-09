@@ -274,7 +274,21 @@ async function applyUpdate() {
 async function copyLink(name) {
   const link = state.value?.links[name]
   if (!link) return
-  await navigator.clipboard.writeText(link)
+  try {
+    await navigator.clipboard.writeText(link)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = link
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+    } finally {
+      textarea.remove()
+    }
+  }
   copied.value = name
   window.setTimeout(() => { if (copied.value === name) copied.value = '' }, 1600)
 }
