@@ -41,7 +41,7 @@ const latest = computed(() => props.samples.at(-1) || { rx: 0, tx: 0 })
       <span><i class="legend-dot download"></i>下载 <strong>{{ formatRate(latest.rx) }}</strong></span>
       <span><i class="legend-dot upload"></i>上传 <strong>{{ formatRate(latest.tx) }}</strong></span>
     </div>
-    <svg viewBox="0 0 640 190" role="img" aria-label="最近网络速率曲线" preserveAspectRatio="none">
+    <svg viewBox="0 0 640 190" role="img" aria-label="最近主机网络速率曲线" preserveAspectRatio="none">
       <line v-for="y in [22, 61, 100, 139, 178]" :key="y" x1="12" :y1="y" x2="628" :y2="y" class="chart-grid" />
       <path v-if="samples.length" :d="area('rx')" class="chart-area download-area" />
       <path v-if="samples.length" :d="area('tx')" class="chart-area upload-area" />

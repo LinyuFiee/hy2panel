@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,13 @@ import (
 	"hy2panel/internal/config"
 	"hy2panel/internal/server"
 	"hy2panel/internal/store"
+	"hy2panel/internal/version"
+)
+
+var (
+	stdin  io.Reader = os.Stdin
+	stdout io.Writer = os.Stdout
+	stderr io.Writer = os.Stderr
 )
 
 func main() {
@@ -32,18 +40,25 @@ func main() {
 		err = runCheck(os.Args[2:])
 	case "render":
 		err = runRender(os.Args[2:])
+	case "version":
+		err = runVersion(os.Args[2:])
+	case "migrate":
+		err = runMigrate(os.Args[2:])
+	case "reset-password":
+		err = runResetPassword(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		os.Exit(1)
 	}
 }
 
 func runInit(args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	path := flags.String("config", "/etc/hy2panel/panel.json", "")
 	panelDomain := flags.String("panel-domain", "", "")
 	hy2Domain := flags.String("hy2-domain", "", "")
@@ -52,19 +67,21 @@ func runInit(args []string) error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *panelDomain == "" || *publicHost == "" || *adminIP == "" {
-		return errors.New("init 需要 panel-domain、public-host 和 admin-ip")
+	if flags.NArg() != 0 {
+		return errors.New("init 不接受位置参数")
+	}
+	if *panelDomain == "" || *publicHost == "" {
+		return errors.New("init 需要 panel-domain 和 public-host")
 	}
 	if _, err := os.Stat(*path); err == nil {
 		return errors.New("配置已存在，拒绝覆盖")
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	passwordBytes, err := io.ReadAll(io.LimitReader(os.Stdin, 1025))
+	password, err := readPassword(stdin)
 	if err != nil {
 		return err
 	}
-	password := strings.TrimRight(string(passwordBytes), "\r\n")
 	cfg, err := config.Initial(*panelDomain, *hy2Domain, *publicHost, *adminIP, password)
 	if err != nil {
 		return err
@@ -76,9 +93,13 @@ func runInit(args []string) error {
 
 func runServe(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	path := flags.String("config", "/etc/hy2panel/panel.json", "")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("serve 不接受位置参数")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -89,10 +110,14 @@ func runServe(args []string) error {
 
 func runRender(args []string) error {
 	flags := flag.NewFlagSet("render", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	path := flags.String("config", "/etc/hy2panel/panel.json", "")
 	output := flags.String("output", "", "")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("render 不接受位置参数")
 	}
 	if *output == "" {
 		return errors.New("render 需要 output")
@@ -133,9 +158,13 @@ func runRender(args []string) error {
 
 func runCheck(args []string) error {
 	flags := flag.NewFlagSet("check", flag.ContinueOnError)
+	flags.SetOutput(stderr)
 	path := flags.String("config", "/etc/hy2panel/panel.json", "")
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("check 不接受位置参数")
 	}
 	cfg, err := store.New(*path).Load()
 	if err != nil {
@@ -144,10 +173,88 @@ func runCheck(args []string) error {
 	if _, err := cfg.SingBoxJSON(); err != nil {
 		return err
 	}
-	fmt.Println("配置有效")
+	fmt.Fprintln(stdout, "配置有效")
 	return nil
 }
 
+func runVersion(args []string) error {
+	flags := flag.NewFlagSet("version", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	asJSON := flags.Bool("json", false, "")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("version 不接受位置参数")
+	}
+	if *asJSON {
+		return json.NewEncoder(stdout).Encode(map[string]any{
+			"version":        version.Version,
+			"config_version": config.SchemaVersion,
+		})
+	}
+	fmt.Fprintln(stdout, version.Version)
+	return nil
+}
+
+func runMigrate(args []string) error {
+	flags := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "/etc/hy2panel/panel.json", "")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("migrate 不接受位置参数")
+	}
+	changed, err := store.New(*path).Migrate()
+	if err != nil {
+		return err
+	}
+	if changed {
+		fmt.Fprintln(stdout, "配置迁移完成")
+	} else {
+		fmt.Fprintln(stdout, "配置无需迁移")
+	}
+	return nil
+}
+
+func runResetPassword(args []string) error {
+	flags := flag.NewFlagSet("reset-password", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "/etc/hy2panel/panel.json", "")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("reset-password 不接受位置参数")
+	}
+	password, err := readPassword(stdin)
+	if err != nil {
+		return err
+	}
+	hash, err := config.HashAdminPassword(password)
+	if err != nil {
+		return err
+	}
+	_, err = store.New(*path).Update(func(cfg *config.Config) error {
+		cfg.AdminPasswordHash = hash
+		return nil
+	})
+	return err
+}
+
+func readPassword(reader io.Reader) (string, error) {
+	passwordBytes, err := io.ReadAll(io.LimitReader(reader, 1025))
+	if err != nil {
+		return "", err
+	}
+	if len(passwordBytes) > 1024 {
+		return "", errors.New("密码输入过长")
+	}
+	return strings.TrimRight(string(passwordBytes), "\r\n"), nil
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "用法: hy2panel <init|serve|check|render> [参数]")
+	fmt.Fprintln(stderr, "用法: hy2panel <init|serve|check|render|version|migrate|reset-password> [参数]")
 }

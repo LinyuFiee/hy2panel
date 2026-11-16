@@ -1,0 +1,17 @@
+[Unit]
+Description=Recover an interrupted hy2panel transaction
+After=local-fs.target
+Before=hy2panel.service sing-box.service hy2panel-upgrade.path hy2panel-sing-box.path
+ConditionPathExists=/var/lib/hy2panel-system/transactions/active/journal.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-recover
+TimeoutStartSec=120s
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

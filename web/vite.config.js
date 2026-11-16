@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue'
 
 const mockState = {
   config: {
-    panel: { domain: 'panel.example.com', admin_cidr: '203.0.113.10/32', public_host: '192.0.2.10' },
+    panel: { domain: 'panel.example.com', public_host: '192.0.2.10' },
     reality: { enabled: true, port: 443, server_name: 'www.microsoft.com', uuid: '00000000-0000-4000-8000-000000000000', private_key: 'mock-private-key', public_key: 'mock-public-key', short_id: '0123456789abcdef' },
     hysteria2: { enabled: true, port: 443, domain: 'hy2.example.com', password: 'mock-password', up_mbps: 100, down_mbps: 100 },
     recovery: { auto_port: false, last_port_change: 0 }
@@ -31,7 +31,111 @@ const mockState = {
   update: { current_version: '0.4.0', latest_version: '0.4.0', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
 }
 
+const mockTraffic = {
+  available: true,
+  stale: false,
+  sampled_at: '2026-11-16T10:32:00Z',
+  last_success: '2026-11-16T10:32:00Z',
+  traffic: {
+    reality: { upload: '9007199254740993', download: '18934876160' },
+    hysteria2: { upload: '5368709120', download: '12884901888' },
+    unattributed: { upload: '268435456', download: '805306368' }
+  },
+  total: { upload: '9007204891889665', download: '32624934912' },
+  rates: {
+    reality: { upload: 586240, download: 2846720 },
+    hysteria2: { upload: 294912, download: 1622016 },
+    unattributed: { upload: 18432, download: 53248 }
+  },
+  active_flows: { reality: 12, hysteria2: 7, unattributed: 2 },
+  attribution_coverage: 0.973
+}
+
+const singBoxVersions = {
+  current_version: '1.14.3',
+  previous_version: '1.14.2',
+  recommended_version: '1.14.4',
+  can_rollback: true,
+  versions: [
+    { version: '1.14.4', tag: 'v1.14.4', status: 'recommended', asset_name: 'sing-box-1.14.4-linux-amd64.tar.gz', size: 31710753, sha256: '699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968', release_url: 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.4' },
+    { version: '1.14.3', tag: 'v1.14.3', status: 'supported', asset_name: 'sing-box-1.14.3-linux-amd64.tar.gz', size: 31584231, sha256: '799a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24969', release_url: 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.3' },
+    { version: '1.14.2', tag: 'v1.14.2', status: 'supported', asset_name: 'sing-box-1.14.2-linux-amd64.tar.gz', size: 31457280, sha256: '899a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24960', release_url: 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.2' }
+  ],
+  operation: {}
+}
+
 let mockTick = 0
+let operationPhaseTimer
+let operationCompleteTimer
+
+function advanceMetrics() {
+  mockTick += 1
+  mockState.status.rx_bytes_per_second = Math.max(0, 900000 + Math.sin(mockTick * 0.8) * 520000 + mockTick * 18000)
+  mockState.status.tx_bytes_per_second = Math.max(0, 260000 + Math.cos(mockTick * 0.7) * 130000)
+  mockState.status.cpu_percent = 16 + Math.sin(mockTick) * 6
+  mockTraffic.sampled_at = new Date().toISOString()
+  mockTraffic.last_success = mockTraffic.sampled_at
+  mockTraffic.rates.reality.download = 2450000 + Math.sin(mockTick * 0.7) * 520000
+  mockTraffic.rates.hysteria2.download = 1280000 + Math.cos(mockTick * 0.6) * 310000
+}
+
+function historyPayload(range) {
+  const sizes = { '1h': 60, '6h': 72, '24h': 96, '7d': 112 }
+  const steps = { '1h': 60000, '6h': 5 * 60000, '24h': 15 * 60000, '7d': 90 * 60000 }
+  const count = sizes[range] || sizes['1h']
+  const step = steps[range] || steps['1h']
+  const now = Date.parse('2026-11-16T10:32:00Z')
+  const points = Array.from({ length: count }, (_, index) => {
+    const realityDownload = Math.round(52000000 + Math.sin(index * 0.31) * 18000000 + index * 110000)
+    const realityUpload = Math.round(13000000 + Math.cos(index * 0.27) * 4500000)
+    const hysteriaDownload = Math.round(29000000 + Math.cos(index * 0.23) * 9000000)
+    const hysteriaUpload = Math.round(9000000 + Math.sin(index * 0.29) * 3200000)
+    const unattributedDownload = 900000 + (index % 4) * 120000
+    const unattributedUpload = 240000 + (index % 3) * 60000
+    const firstGap = Math.floor(count * 0.42)
+    const gap = index === firstGap || index === firstGap + 1
+    return {
+      minute: new Date(now - (count - 1 - index) * step).toISOString(),
+      traffic: {
+        reality: { upload: String(realityUpload), download: String(realityDownload) },
+        hysteria2: { upload: String(hysteriaUpload), download: String(hysteriaDownload) },
+        unattributed: { upload: String(unattributedUpload), download: String(unattributedDownload) }
+      },
+      total: {
+        upload: String(realityUpload + hysteriaUpload + unattributedUpload),
+        download: String(realityDownload + hysteriaDownload + unattributedDownload)
+      },
+      gap
+    }
+  })
+  return { range, available: true, points }
+}
+
+function beginCoreOperation(action, targetVersion = '') {
+  clearTimeout(operationPhaseTimer)
+  clearTimeout(operationCompleteTimer)
+  const operation = {
+    id: `mock-${Date.now()}`,
+    action,
+    status: 'running',
+    phase: 'requested',
+    target_version: targetVersion,
+    message: action === 'switch' ? `准备切换到 v${targetVersion}` : '准备回滚上一版本'
+  }
+  singBoxVersions.operation = operation
+  operationPhaseTimer = setTimeout(() => {
+    singBoxVersions.operation = { ...operation, phase: 'verifying', message: '正在校验官方资产 SHA-256' }
+  }, 500)
+  operationCompleteTimer = setTimeout(() => {
+    const oldCurrent = singBoxVersions.current_version
+    const nextVersion = action === 'rollback' ? singBoxVersions.previous_version : targetVersion
+    singBoxVersions.current_version = nextVersion
+    singBoxVersions.previous_version = oldCurrent
+    singBoxVersions.can_rollback = true
+    singBoxVersions.operation = { ...operation, status: 'succeeded', phase: 'completed', message: `sing-box 已运行 v${nextVersion}` }
+  }, 1700)
+  return operation
+}
 
 export default defineConfig({
   plugins: [
@@ -45,6 +149,71 @@ export default defineConfig({
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           if (req.url === '/api/login') {
             res.end('{"status":"ok"}')
+            return
+          }
+          if (req.url === '/api/logout') {
+            res.end('{"status":"ok"}')
+            return
+          }
+          if (req.url === '/api/system/status') {
+            advanceMetrics()
+            res.end(JSON.stringify({ status: mockState.status, speedtest: mockState.speedtest }))
+            return
+          }
+          if (req.url === '/api/traffic/live') {
+            advanceMetrics()
+            res.end(JSON.stringify(mockTraffic))
+            return
+          }
+          if (req.url?.startsWith('/api/traffic/history')) {
+            const url = new URL(req.url, 'http://localhost')
+            const range = url.searchParams.get('range') || '1h'
+            if (!['1h', '6h', '24h', '7d'].includes(range)) {
+              res.statusCode = 400
+              res.end('{"error":"unsupported traffic history range"}')
+              return
+            }
+            res.end(JSON.stringify(historyPayload(range)))
+            return
+          }
+          if (req.url === '/api/sing-box/versions') {
+            res.end(JSON.stringify(singBoxVersions))
+            return
+          }
+          if (req.url === '/api/sing-box/switch') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', () => {
+              if (singBoxVersions.operation.status === 'running') {
+                res.statusCode = 409
+                res.end('{"error":"已有核心维护任务正在运行"}')
+                return
+              }
+              let target = ''
+              try { target = JSON.parse(body).version } catch {}
+              if (!singBoxVersions.versions.some(entry => entry.version === target)) {
+                res.statusCode = 400
+                res.end('{"error":"该 sing-box 版本不在兼容清单中"}')
+                return
+              }
+              res.statusCode = 202
+              res.end(JSON.stringify(beginCoreOperation('switch', target)))
+            })
+            return
+          }
+          if (req.url === '/api/sing-box/rollback') {
+            if (singBoxVersions.operation.status === 'running') {
+              res.statusCode = 409
+              res.end('{"error":"已有核心维护任务正在运行"}')
+              return
+            }
+            if (!singBoxVersions.can_rollback) {
+              res.statusCode = 409
+              res.end('{"error":"没有可回滚的上一版本"}')
+              return
+            }
+            res.statusCode = 202
+            res.end(JSON.stringify(beginCoreOperation('rollback')))
             return
           }
           if (req.url?.startsWith('/api/logs')) {
@@ -96,12 +265,7 @@ export default defineConfig({
             }, 3000)
             return
           }
-          if (req.url === '/api/state') {
-            mockTick += 1
-            mockState.status.rx_bytes_per_second = 900000 + Math.sin(mockTick * 0.8) * 520000 + mockTick * 18000
-            mockState.status.tx_bytes_per_second = 260000 + Math.cos(mockTick * 0.7) * 130000
-            mockState.status.cpu_percent = 16 + Math.sin(mockTick) * 6
-          }
+          if (req.url === '/api/state') advanceMetrics()
           res.end(JSON.stringify(mockState))
         })
       }

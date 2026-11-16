@@ -5,12 +5,15 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +21,8 @@ import (
 	"hy2panel/internal/config"
 	"hy2panel/internal/racknerd"
 	"hy2panel/internal/store"
+	"hy2panel/internal/traffic"
+	"hy2panel/internal/version"
 	panelweb "hy2panel/web"
 )
 
@@ -41,6 +46,8 @@ type Server struct {
 	nodeMetaCachedAt time.Time
 	nodeMetaTTL      time.Duration
 	update           *UpdateManager
+	traffic          *traffic.Collector
+	trafficErr       string
 }
 
 type stateResponse struct {
@@ -69,6 +76,7 @@ func New(store *store.Store, applier Applier) *Server {
 		rackNerdClient: &racknerd.Client{},
 		nodeMetaClient: &geoIPClient{},
 		update:         NewUpdateManager(filepath.Dir(store.Path())),
+		trafficErr:     "协议流量采集尚未启动",
 	}
 }
 
@@ -77,13 +85,30 @@ func (s *Server) Serve(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	prefix, err := netip.ParsePrefix(cfg.Panel.AdminCIDR)
-	if err != nil {
-		return err
+	if cfg.Telemetry.Enabled {
+		client, clientErr := traffic.NewClashClient("http://"+cfg.Telemetry.Listen, cfg.Telemetry.Secret)
+		if clientErr == nil {
+			collector, collectorErr := traffic.NewCollector(client, traffic.NewStore("/var/lib/hy2panel/traffic.json"))
+			if collectorErr != nil && (errors.Is(collectorErr, traffic.ErrStateCorrupt) || errors.Is(collectorErr, traffic.ErrUnknownSchema)) {
+				quarantine := fmt.Sprintf("/var/lib/hy2panel/traffic.corrupt-%d.json", time.Now().Unix())
+				if renameErr := os.Rename("/var/lib/hy2panel/traffic.json", quarantine); renameErr == nil {
+					collector, collectorErr = traffic.NewCollector(client, traffic.NewStore("/var/lib/hy2panel/traffic.json"))
+				}
+			}
+			if collectorErr == nil {
+				s.traffic = collector
+				s.trafficErr = ""
+				go func() { _ = collector.Run(ctx) }()
+			} else {
+				s.trafficErr = collectorErr.Error()
+			}
+		} else {
+			s.trafficErr = clientErr.Error()
+		}
 	}
 	server := &http.Server{
 		Addr:              cfg.Panel.Listen,
-		Handler:           s.routes(prefix),
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -104,14 +129,24 @@ func (s *Server) Serve(ctx context.Context) error {
 	return err
 }
 
-func (s *Server) routes(prefix netip.Prefix) http.Handler {
+func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":         "ok",
+			"version":        version.Version,
+			"config_version": config.SchemaVersion,
+		})
 	})
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.Handle("POST /api/logout", s.requireAuth(http.HandlerFunc(s.logout)))
 	mux.Handle("GET /api/state", s.requireAuth(http.HandlerFunc(s.state)))
+	mux.Handle("GET /api/system/status", s.requireAuth(http.HandlerFunc(s.systemStatus)))
+	mux.Handle("GET /api/traffic/live", s.requireAuth(http.HandlerFunc(s.trafficLive)))
+	mux.Handle("GET /api/traffic/history", s.requireAuth(http.HandlerFunc(s.trafficHistory)))
+	mux.Handle("GET /api/sing-box/versions", s.requireAuth(http.HandlerFunc(s.singBoxVersions)))
+	mux.Handle("POST /api/sing-box/switch", s.requireAuth(http.HandlerFunc(s.switchSingBox)))
+	mux.Handle("POST /api/sing-box/rollback", s.requireAuth(http.HandlerFunc(s.rollbackSingBox)))
 	mux.Handle("POST /api/config", s.requireAuth(http.HandlerFunc(s.updateConfig)))
 	mux.Handle("POST /api/settings/racknerd", s.requireAuth(http.HandlerFunc(s.updateRackNerd)))
 	mux.Handle("POST /api/settings/recovery", s.requireAuth(http.HandlerFunc(s.updateRecovery)))
@@ -122,7 +157,7 @@ func (s *Server) routes(prefix netip.Prefix) http.Handler {
 	mux.Handle("POST /api/bbr", s.requireAuth(http.HandlerFunc(s.applyBBR)))
 	mux.Handle("POST /api/speedtest", s.requireAuth(http.HandlerFunc(s.startSpeedTest)))
 	mux.Handle("GET /", http.FileServer(http.FS(panelweb.Dist())))
-	return securityHeaders(whitelist(prefix, mux))
+	return securityHeaders(mux)
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -142,12 +177,32 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "读取配置失败")
 		return
 	}
-	token, err := s.auth.login(input.Password, cfg.AdminPasswordHash)
+	source, err := sourceIP(r.RemoteAddr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "登录来源地址无效")
+		return
+	}
+	token, retryAfter, err := s.auth.login(source.String(), input.Password, cfg.AdminPasswordHash)
+	if errors.Is(err, errLoginBusy) {
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
+	if errors.Is(err, errLoginLimited) || (errors.Is(err, errInvalidPassword) && retryAfter > 0) {
+		seconds := int((retryAfter + time.Second - 1) / time.Second)
+		if seconds < 1 {
+			seconds = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(seconds))
+		writeError(w, http.StatusTooManyRequests, errLoginLimited.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
-	http.SetCookie(w, sessionCookie(token, time.Now().Add(sessionLifetime), int(sessionLifetime.Seconds())))
+	now := s.auth.now()
+	http.SetCookie(w, sessionCookie(token, now.Add(sessionLifetime), int(sessionLifetime.Seconds())))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -210,14 +265,13 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "配置应用器不可用")
 		return
 	}
+	if s.traffic != nil {
+		_ = s.traffic.Checkpoint()
+	}
 	applyContext, cancelApply := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancelApply()
-	if err := s.applier.Apply(applyContext, singBoxJSON); err != nil {
+	if err := s.applier.Apply(applyContext, &next, singBoxJSON); err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
-		return
-	}
-	if err := s.store.Save(&next); err != nil {
-		writeError(w, http.StatusInternalServerError, "节点已应用，但面板配置保存失败")
 		return
 	}
 	writeJSON(w, http.StatusOK, s.makeState(r.Context(), &next))
@@ -234,22 +288,16 @@ func (s *Server) requireAuth(next http.Handler) http.Handler {
 	})
 }
 
-func whitelist(prefix netip.Prefix, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			host = r.RemoteAddr
-		}
-		addr, err := netip.ParseAddr(host)
-		if err == nil {
-			addr = addr.Unmap()
-		}
-		if err != nil || !prefix.Contains(addr) {
-			writeError(w, http.StatusForbidden, "当前管理 IP 不在白名单内")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+func sourceIP(remoteAddr string) (netip.Addr, error) {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	return addr.Unmap(), nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {

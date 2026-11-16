@@ -18,10 +18,16 @@ const copied = ref('')
 const state = ref(null)
 const settingsRef = ref(null)
 const networkSamples = ref([])
+const trafficLive = ref(null)
+const trafficHistory = ref(null)
+const trafficHistoryRange = ref('1h')
+const trafficHistoryLoading = ref(false)
+const singBoxVersions = ref(null)
+const singBoxLoading = ref(false)
 const diagnosticReport = ref(null)
 const logEntries = ref([])
 const logUnit = ref('sing-box')
-const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false, updateCheck: false, updating: false })
+const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false, updateCheck: false, updating: false, singBox: false })
 const form = reactive({
   public_host: '',
   reality: { enabled: true, port: 443, server_name: 'www.microsoft.com', uuid: '', private_key: '', public_key: '', short_id: '' },
@@ -37,13 +43,22 @@ const titles = {
   dashboard: ['节点概览', '实时掌握连接、流量与网络质量'],
   nodes: ['节点管理', '保留常用设置，把复杂参数收进高级选项'],
   maintenance: ['日志与自检', '快速定位配置、监听、证书和服务异常'],
-  settings: ['系统设置', 'RackNerd、BBR 与访问安全']
+  settings: ['系统设置', '核心版本、网络优化与访问安全']
 }
+const maintenanceBusy = computed(() => busy.updating || busy.singBox || state.value?.update?.updating || singBoxVersions.value?.operation?.status === 'running')
 const currentTitle = computed(() => titles[activeTab.value])
-const panelAddress = computed(() => state.value ? `https://${state.value.config.panel.domain}:8443` : '')
-let pollTimer
+const panelAddress = computed(() => state.value?.config?.panel?.domain ? `https://${state.value.config.panel.domain}:8443` : '')
+let statePollTimer
+let livePollTimer
+let historyPollTimer
+let singBoxPollTimer
 let noticeTimer
-let refreshing = false
+let stateRefreshing = false
+let systemRefreshing = false
+let trafficRefreshing = false
+let historyRefreshing = false
+let singBoxRefreshing = false
+let authStopped = false
 
 async function request(path, options = {}) {
   const headers = { 'X-Requested-With': 'fetch', ...(options.headers || {}) }
@@ -51,6 +66,7 @@ async function request(path, options = {}) {
   const response = await fetch(path, { credentials: 'same-origin', ...options, headers })
   const payload = await response.json().catch(() => ({}))
   if (response.status === 401 && path !== '/api/login') {
+    stopPollingForAuth()
     view.value = 'login'
     state.value = null
   }
@@ -63,29 +79,97 @@ async function request(path, options = {}) {
 }
 
 function syncForms(config) {
-  form.public_host = config.panel.public_host
-  Object.assign(form.reality, config.reality)
-  Object.assign(form.hysteria2, config.hysteria2)
+  if (!config) return
+  form.public_host = config.panel?.public_host || ''
+  Object.assign(form.reality, config.reality || {})
+  Object.assign(form.hysteria2, config.hysteria2 || {})
 }
 
 function applyState(payload, sync = false) {
+  const previousStatus = state.value?.status
   state.value = payload
   if (sync) syncForms(payload.config)
-  const status = payload.status
-  networkSamples.value = [...networkSamples.value, { rx: status.rx_bytes_per_second, tx: status.tx_bytes_per_second }].slice(-30)
+  if (!previousStatus && payload.status) appendNetworkSample(payload.status)
+}
+
+function appendNetworkSample(status) {
+  if (!status) return
+  networkSamples.value = [...networkSamples.value, {
+    rx: Number(status.rx_bytes_per_second || 0),
+    tx: Number(status.tx_bytes_per_second || 0)
+  }].slice(-30)
 }
 
 async function refresh(sync = false, showError = false) {
-  if (refreshing) return
-  refreshing = true
+  if (stateRefreshing || authStopped) return false
+  stateRefreshing = true
   try {
     applyState(await request('/api/state'), sync)
     view.value = 'app'
+    return true
   } catch (failure) {
     if (showError && failure.status !== 401) error.value = failure.message
     if (view.value !== 'login' && !state.value) view.value = 'login'
+    return false
   } finally {
-    refreshing = false
+    stateRefreshing = false
+  }
+}
+
+async function refreshSystemStatus(showError = false) {
+  if (systemRefreshing || authStopped || view.value !== 'app') return
+  systemRefreshing = true
+  try {
+    const payload = await request('/api/system/status')
+    if (!state.value) return
+    state.value = { ...state.value, status: payload.status, speedtest: payload.speedtest }
+    appendNetworkSample(payload.status)
+  } catch (failure) {
+    if (showError && failure.status !== 401) error.value = failure.message
+  } finally {
+    systemRefreshing = false
+  }
+}
+
+async function refreshTrafficLive(showError = false) {
+  if (trafficRefreshing || authStopped || view.value !== 'app') return
+  trafficRefreshing = true
+  try {
+    trafficLive.value = await request('/api/traffic/live')
+  } catch (failure) {
+    if (showError && failure.status !== 401) error.value = failure.message
+  } finally {
+    trafficRefreshing = false
+  }
+}
+
+async function loadTrafficHistory(range = trafficHistoryRange.value, showError = false) {
+  if (!['1h', '6h', '24h', '7d'].includes(range) || historyRefreshing || authStopped || view.value !== 'app') return
+  historyRefreshing = true
+  trafficHistoryLoading.value = true
+  try {
+    const payload = await request(`/api/traffic/history?range=${encodeURIComponent(range)}`)
+    trafficHistoryRange.value = range
+    trafficHistory.value = payload
+  } catch (failure) {
+    if (showError && failure.status !== 401) error.value = failure.message
+  } finally {
+    historyRefreshing = false
+    trafficHistoryLoading.value = false
+  }
+}
+
+async function loadSingBoxVersions(showError = false) {
+  if (singBoxRefreshing || authStopped || view.value !== 'app') return
+  singBoxRefreshing = true
+  singBoxLoading.value = true
+  try {
+    singBoxVersions.value = await request('/api/sing-box/versions')
+  } catch (failure) {
+    if (showError && failure.status !== 401) error.value = failure.message
+  } finally {
+    singBoxRefreshing = false
+    singBoxLoading.value = false
   }
 }
 
@@ -94,9 +178,14 @@ async function login() {
   error.value = ''
   try {
     await request('/api/login', { method: 'POST', body: JSON.stringify({ password: password.value }) })
+    authStopped = false
     password.value = ''
     activeTab.value = 'dashboard'
-    await refresh(true, true)
+    const authenticated = await refresh(true, true)
+    if (authenticated && view.value === 'app') {
+      await Promise.all([refreshSystemStatus(), refreshTrafficLive(), loadTrafficHistory(trafficHistoryRange.value)])
+      startPolling()
+    }
   } catch (failure) {
     error.value = failure.message
   } finally {
@@ -109,7 +198,11 @@ async function logout() {
     await request('/api/logout', { method: 'POST', body: '{}' })
   } catch {
   } finally {
+    stopPollingForAuth()
     state.value = null
+    trafficLive.value = null
+    trafficHistory.value = null
+    singBoxVersions.value = null
     view.value = 'login'
   }
 }
@@ -118,7 +211,11 @@ function switchTab(tab) {
   activeTab.value = tab
   error.value = ''
   notice.value = ''
+  if (tab === 'dashboard') {
+    loadTrafficHistory(trafficHistoryRange.value)
+  }
   if (tab === 'maintenance' && !logEntries.value.length) loadLogs()
+  if (tab === 'settings') loadSingBoxVersions()
 }
 
 function showNotice(message) {
@@ -128,6 +225,10 @@ function showNotice(message) {
 }
 
 async function saveNodes() {
+  if (maintenanceBusy.value) {
+    error.value = '核心或面板正在维护，请等待完成后再保存节点配置'
+    return
+  }
   busy.nodes = true
   error.value = ''
   try {
@@ -177,6 +278,10 @@ async function clearRackNerd() {
 }
 
 async function applyBBR() {
+  if (maintenanceBusy.value) {
+    error.value = '维护任务正在运行，请稍后再应用 BBR'
+    return
+  }
   busy.bbr = true
   error.value = ''
   try {
@@ -244,6 +349,48 @@ async function updateRecovery(autoPort) {
   }
 }
 
+async function switchSingBox(version) {
+  if (!version || maintenanceBusy.value) return
+  if (!window.confirm(`切换 sing-box 到 v${version} 会短暂中断代理连接。确定继续吗？`)) return
+  busy.singBox = true
+  error.value = ''
+  try {
+    const operation = await request('/api/sing-box/switch', {
+      method: 'POST', body: JSON.stringify({ version })
+    })
+    if (singBoxVersions.value) singBoxVersions.value = { ...singBoxVersions.value, operation }
+    showNotice(`sing-box v${version} 切换任务已提交`)
+  } catch (failure) {
+    error.value = failure.message
+    if (failure.status === 409) await loadSingBoxVersions()
+  } finally {
+    busy.singBox = false
+  }
+}
+
+async function rollbackSingBox() {
+  if (maintenanceBusy.value || !singBoxVersions.value?.can_rollback) return
+  const previous = singBoxVersions.value.previous_version
+  if (!window.confirm(`回滚到上一版本${previous ? ` v${previous}` : ''} 会短暂中断代理连接。确定继续吗？`)) return
+  busy.singBox = true
+  error.value = ''
+  try {
+    const operation = await request('/api/sing-box/rollback', { method: 'POST', body: '{}' })
+    singBoxVersions.value = { ...singBoxVersions.value, operation }
+    showNotice('sing-box 回滚任务已提交')
+  } catch (failure) {
+    error.value = failure.message
+    if (failure.status === 409) await loadSingBoxVersions()
+  } finally {
+    busy.singBox = false
+  }
+}
+
+function setTrafficHistoryRange(range) {
+  if (range === trafficHistoryRange.value && trafficHistory.value) return
+  loadTrafficHistory(range, true)
+}
+
 async function checkUpdates() {
   busy.updateCheck = true
   error.value = ''
@@ -258,6 +405,10 @@ async function checkUpdates() {
 }
 
 async function applyUpdate() {
+  if (maintenanceBusy.value) {
+    error.value = 'sing-box 或面板维护任务正在运行'
+    return
+  }
   if (!window.confirm('更新会短暂重启面板，但会保留节点配置。确定继续吗？')) return
   busy.updating = true
   error.value = ''
@@ -293,16 +444,71 @@ async function copyLink(name) {
   window.setTimeout(() => { if (copied.value === name) copied.value = '' }, 1600)
 }
 
-onMounted(async () => {
-  await refresh(true, true)
-  pollTimer = window.setInterval(() => {
+function stopPollingForAuth() {
+  authStopped = true
+  stateRefreshing = false
+  systemRefreshing = false
+  trafficRefreshing = false
+  historyRefreshing = false
+  singBoxRefreshing = false
+  trafficHistoryLoading.value = false
+  singBoxLoading.value = false
+  window.clearInterval(statePollTimer)
+  window.clearInterval(livePollTimer)
+  window.clearInterval(historyPollTimer)
+  window.clearInterval(singBoxPollTimer)
+  statePollTimer = undefined
+  livePollTimer = undefined
+  historyPollTimer = undefined
+  singBoxPollTimer = undefined
+}
+
+function startPolling() {
+  authStopped = false
+  window.clearInterval(statePollTimer)
+  window.clearInterval(livePollTimer)
+  window.clearInterval(historyPollTimer)
+  window.clearInterval(singBoxPollTimer)
+  statePollTimer = window.setInterval(() => {
     if (view.value === 'app' && !document.hidden) refresh(false, false)
   }, 3000)
+  livePollTimer = window.setInterval(() => {
+    if (view.value === 'app' && !document.hidden) {
+      refreshSystemStatus()
+      refreshTrafficLive()
+    }
+  }, 2500)
+  historyPollTimer = window.setInterval(() => {
+    if (view.value === 'app' && activeTab.value === 'dashboard' && !document.hidden) loadTrafficHistory(trafficHistoryRange.value)
+  }, 60000)
+  singBoxPollTimer = window.setInterval(() => {
+    if (view.value === 'app' && activeTab.value === 'settings' && !document.hidden) loadSingBoxVersions()
+  }, 3000)
+}
+
+function handleVisibilityChange() {
+  if (document.hidden || authStopped || view.value !== 'app') return
+  refresh(false, false)
+  refreshSystemStatus()
+  refreshTrafficLive()
+  if (activeTab.value === 'dashboard') loadTrafficHistory(trafficHistoryRange.value)
+  if (activeTab.value === 'settings') loadSingBoxVersions()
+}
+
+onMounted(async () => {
+  authStopped = false
+  const authenticated = await refresh(true, true)
+  if (authenticated && view.value === 'app') {
+    await Promise.all([refreshSystemStatus(), refreshTrafficLive(), loadTrafficHistory(trafficHistoryRange.value)])
+    startPolling()
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  window.clearInterval(pollTimer)
+  stopPollingForAuth()
   window.clearTimeout(noticeTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 
@@ -329,7 +535,7 @@ onBeforeUnmount(() => {
         <div v-if="error" class="alert error-alert">{{ error }}</div>
         <label>管理员密码<input v-model="password" type="password" autocomplete="current-password" placeholder="输入密码" required autofocus /></label>
         <button class="primary-button full-button" type="submit" :disabled="loginBusy">{{ loginBusy ? '正在登录…' : '进入控制台' }}</button>
-        <div class="login-security"><ShieldCheck :size="14" />HTTPS · IP 白名单 · 安全会话</div>
+        <div class="login-security"><ShieldCheck :size="14" />公网 HTTPS · 登录限速 · 安全会话</div>
       </form>
     </section>
   </main>
@@ -356,10 +562,36 @@ onBeforeUnmount(() => {
       </header>
       <div v-if="error" class="alert error-alert">{{ error }}</div>
       <div v-if="notice" class="alert success-alert">{{ notice }}</div>
-      <DashboardView v-if="activeTab === 'dashboard'" :state="state" :samples="networkSamples" :starting="busy.speedtest" @speedtest="startSpeedTest" @settings="switchTab('settings')" />
+      <DashboardView
+        v-if="activeTab === 'dashboard'"
+        :state="state"
+        :samples="networkSamples"
+        :starting="busy.speedtest"
+        :traffic="trafficLive"
+        :history="trafficHistory"
+        :history-range="trafficHistoryRange"
+        :history-loading="trafficHistoryLoading"
+        @speedtest="startSpeedTest"
+        @settings="switchTab('settings')"
+        @history-range="setTrafficHistoryRange"
+      />
       <NodesView v-else-if="activeTab === 'nodes'" :form="form" :links="state.links" :meta="state.node_meta" :saving="busy.nodes" :copied="copied" @save="saveNodes" @copy="copyLink" />
       <MaintenanceView v-else-if="activeTab === 'maintenance'" :state="state" :report="diagnosticReport" :entries="logEntries" :log-unit="logUnit" :busy="busy" @diagnostics="runDiagnostics" @logs="loadLogs" @recovery="updateRecovery" />
-      <SettingsView v-else ref="settingsRef" :state="state" :busy="busy" @save-racknerd="saveRackNerd" @clear-racknerd="clearRackNerd" @apply-bbr="applyBBR" @check-update="checkUpdates" @apply-update="applyUpdate" />
+      <SettingsView
+        v-else
+        ref="settingsRef"
+        :state="state"
+        :busy="busy"
+        :sing-box="singBoxVersions"
+        :sing-box-loading="singBoxLoading"
+        @save-racknerd="saveRackNerd"
+        @clear-racknerd="clearRackNerd"
+        @apply-bbr="applyBBR"
+        @check-update="checkUpdates"
+        @apply-update="applyUpdate"
+        @switch-sing-box="switchSingBox"
+        @rollback-sing-box="rollbackSingBox"
+      />
     </main>
   </div>
 </template>

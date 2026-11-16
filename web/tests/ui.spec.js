@@ -5,13 +5,32 @@ async function openDashboard(page) {
   await expect(page.getByRole('heading', { name: '让连接轻松一点。' })).toBeVisible()
 }
 
-test('dashboard renders metrics and Hairline without runtime errors', async ({ page }) => {
+async function expectNoHorizontalOverflow(page) {
+  const dimensions = await page.evaluate(() => ({
+    viewport: window.innerWidth,
+    document: document.documentElement.scrollWidth,
+    body: document.body.scrollWidth
+  }))
+  expect(dimensions.document).toBeLessThanOrEqual(dimensions.viewport + 1)
+  expect(dimensions.body).toBeLessThanOrEqual(dimensions.viewport + 1)
+}
+
+test('dashboard renders host and protocol monitoring without runtime errors', async ({ page }, testInfo) => {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await openDashboard(page)
   await expect(page.getByRole('heading', { name: '本月流量' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '实时网络' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '主机网络' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '服务器测速' })).toBeVisible()
+  await expect(page.getByTestId('reality-traffic-card')).toContainText('Reality')
+  await expect(page.getByTestId('reality-traffic-card')).toContainText('实时下行')
+  await expect(page.getByTestId('hysteria2-traffic-card')).toContainText('Hysteria2')
+  await expect(page.getByTestId('unattributed-traffic')).toContainText('未归属流量')
+  await expect(page.getByTestId('unattributed-traffic')).toContainText('97.3%')
+  await expect(page.getByTestId('protocol-traffic-chart')).toBeVisible()
+  await expect(page.locator('.protocol-gap')).toHaveCount(2)
+  await page.getByRole('button', { name: '6 小时', exact: true }).click()
+  await expect(page.getByRole('button', { name: '6 小时', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByText('已启用', { exact: true })).toBeVisible()
   await expect(page.locator('.hairline-figure svg')).toBeVisible()
   await expect(page.locator('.download-line')).toHaveAttribute('d', /L/)
@@ -23,14 +42,15 @@ test('dashboard renders metrics and Hairline without runtime errors', async ({ p
   await expect(githubLink).toHaveAttribute('href', 'https://github.com/LinyuFiee/hy2panel')
   await expect(githubLink).toHaveAttribute('target', '_blank')
   await expect(githubLink).toHaveAttribute('rel', 'noopener noreferrer')
-  await page.screenshot({ path: '../docs/images/dashboard.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('dashboard.png'), fullPage: true })
+  expect(errors).toEqual([])
 })
 
 async function qrCodesReady(page) {
   return page.locator('.qr-wrap img').evaluateAll(images => images.every(image => image.complete && image.naturalWidth > 0))
 }
 
-test('node configuration and client links are accessible', async ({ page }) => {
+test('node configuration and client links are accessible', async ({ page }, testInfo) => {
   await openDashboard(page)
   await page.getByRole('button', { name: '节点管理', exact: true }).click()
   await expect(page.getByRole('heading', { name: '🇺🇸 US-Reality', exact: true })).toBeVisible()
@@ -48,27 +68,57 @@ test('node configuration and client links are accessible', async ({ page }) => {
   expect(await qrCodesReady(page)).toBe(true)
   await page.getByRole('button', { name: '复制链接', exact: true }).first().click()
   await expect(page.getByRole('button', { name: '已复制', exact: true })).toBeVisible()
-  await page.screenshot({ path: '../docs/images/nodes.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('nodes.png'), fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
-  expect(overflow).toBe(false)
+  await expectNoHorizontalOverflow(page)
 })
 
-test('settings expose RackNerd and BBR controls', async ({ page }) => {
+test('settings manage sing-box versions and expose current security controls', async ({ page }, testInfo) => {
   await openDashboard(page)
   await page.getByRole('button', { name: '系统设置', exact: true }).click()
+  const versionCard = page.getByTestId('sing-box-version-card')
+  await expect(versionCard).toBeVisible()
+  await expect(versionCard).toContainText('当前版本')
+  await expect(versionCard).toContainText('v1.14.3')
+  await expect(versionCard).toContainText('上一版本')
+  await expect(versionCard).toContainText('v1.14.2')
+  await expect(versionCard).toContainText('推荐版本')
+  await expect(versionCard).toContainText('v1.14.4')
+  await expect(page.getByLabel('目标版本')).toHaveValue('1.14.4')
+  const release = versionCard.getByRole('link', { name: 'Release' })
+  await expect(release).toHaveAttribute('href', 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.4')
+  await expect(release).toHaveAttribute('rel', 'noopener noreferrer')
+
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '切换核心', exact: true }).click()
+  await expect(page.getByRole('button', { name: '正在切换…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: '回滚上一版本', exact: true })).toBeDisabled()
+  await expect(versionCard).toContainText('已提交')
+  await expect(versionCard).toContainText('sing-box 已运行 v1.14.4', { timeout: 8000 })
+  await expect(versionCard).toContainText('v1.14.4')
+
+  page.once('dialog', dialog => dialog.accept())
+  await page.getByRole('button', { name: '回滚上一版本', exact: true }).click()
+  await expect(page.getByRole('button', { name: '正在回滚…', exact: true })).toBeDisabled()
+  await expect(versionCard).toContainText('sing-box 已运行 v1.14.3', { timeout: 8000 })
+
   await expect(page.getByRole('heading', { name: 'RackNerd 官方流量' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'BBR 网络优化' })).toBeVisible()
   await expect(page.getByLabel('API Key', { exact: true })).toHaveAttribute('type', 'password')
   await expect(page.getByLabel('API Hash', { exact: true })).toHaveAttribute('type', 'password')
   await expect(page.getByRole('heading', { name: '面板更新' })).toBeVisible()
+  const securityCard = page.locator('.security-card')
+  await expect(securityCard).toContainText('仅通过 HTTPS 访问')
+  await expect(securityCard).toContainText('按来源限制登录尝试速率')
+  await expect(securityCard).toContainText('安全会话')
+  await expect(securityCard).not.toContainText('白名单')
   await page.getByRole('button', { name: '检测更新', exact: true }).click()
   await expect(page.getByText('发现新版本', { exact: true })).toBeVisible()
   await expect(page.getByText('v0.5.0', { exact: true })).toBeVisible()
   page.once('dialog', dialog => dialog.accept())
   await page.getByRole('button', { name: '立即更新', exact: true }).click()
   await expect(page.locator('.update-card a[href="https://github.com/LinyuFiee/hy2panel"]')).toHaveAttribute('target', '_blank')
-  await page.screenshot({ path: '../docs/images/settings.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('settings.png'), fullPage: true })
 })
 
 test('speed test can start and finish', async ({ page }) => {
@@ -81,7 +131,7 @@ test('speed test can start and finish', async ({ page }) => {
   await expect(page.locator('.speed-results strong').first()).toContainText('683')
 })
 
-test('maintenance shows diagnostics, logs and recovery controls', async ({ page }) => {
+test('maintenance shows diagnostics, logs and recovery controls', async ({ page }, testInfo) => {
   await openDashboard(page)
   await page.getByRole('button', { name: '日志与自检', exact: true }).click()
   await expect(page.getByRole('heading', { name: '服务端问题自检' })).toBeVisible()
@@ -92,13 +142,18 @@ test('maintenance shows diagnostics, logs and recovery controls', async ({ page 
   const recoveryToggle = page.locator('.recovery-row .toggle input')
   await recoveryToggle.check()
   await expect(recoveryToggle).toBeChecked()
-  await page.screenshot({ path: '../docs/images/maintenance.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('maintenance.png'), fullPage: true })
 })
 
-test('mobile layout does not overflow horizontally', async ({ page }) => {
+test('mobile protocol and settings layouts do not overflow horizontally', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await openDashboard(page)
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)
-  expect(overflow).toBe(false)
-  await page.screenshot({ path: '../docs/images/mobile.png', fullPage: true })
+  await expect(page.getByTestId('reality-traffic-card')).toBeVisible()
+  await expect(page.getByTestId('unattributed-traffic')).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({ path: testInfo.outputPath('mobile-dashboard.png'), fullPage: true })
+  await page.getByRole('button', { name: '系统设置', exact: true }).click()
+  await expect(page.getByTestId('sing-box-version-card')).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({ path: testInfo.outputPath('mobile-settings.png'), fullPage: true })
 })

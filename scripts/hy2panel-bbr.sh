@@ -2,20 +2,25 @@
 set -Eeuo pipefail
 
 BASE=/etc/hy2panel
+SYSTEM_STATE=/var/lib/hy2panel-system
 TEMPLATE="${BASE}/99-hy2panel.conf"
 TARGET=/etc/sysctl.d/99-hy2panel.conf
-BACKUP="${BASE}/bbr.previous.conf"
+BACKUP="${SYSTEM_STATE}/bbr.previous.conf"
 REQUEST="${BASE}/bbr.request"
 RESULT="${BASE}/bbr.result"
-LOG_FILE="${BASE}/bbr.log"
+LOG_FILE="${SYSTEM_STATE}/bbr.log"
+
+source /usr/local/lib/hy2panel/hy2panel-transaction.sh
+install -d -o root -g root -m 700 "${SYSTEM_STATE}"
 
 write_result() {
-  printf '%s\n' "$1" > "${RESULT}"
-  chown hy2panel:hy2panel "${RESULT}"
-  chmod 600 "${RESULT}"
+  hy2panel_atomic_text "${RESULT}" hy2panel hy2panel 600 "$1"
 }
 
 rm -f "${REQUEST}" "${RESULT}"
+if [[ -L ${LOG_FILE} ]]; then
+  rm -f "${LOG_FILE}"
+fi
 : > "${LOG_FILE}"
 chmod 600 "${LOG_FILE}"
 

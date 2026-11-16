@@ -1,0 +1,308 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to check out and test
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Frontend, Go, and clean build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify project versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          PACKAGE_VERSION="$(node -p "require('./web/package.json').version")"
+          LOCK_VERSION="$(node -p "require('./web/package-lock.json').version")"
+          LOCK_ROOT_VERSION="$(node -p "require('./web/package-lock.json').packages[''].version")"
+          GO_VERSION="$(sed -nE 's/^[[:space:]]*var[[:space:]]+Version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' internal/version/version.go)"
+          [[ -n ${PACKAGE_VERSION} && -n ${LOCK_VERSION} && -n ${LOCK_ROOT_VERSION} && -n ${GO_VERSION} ]]
+          [[ ${PACKAGE_VERSION} == "${LOCK_VERSION}" ]]
+          [[ ${PACKAGE_VERSION} == "${LOCK_ROOT_VERSION}" ]]
+          [[ ${PACKAGE_VERSION} == "${GO_VERSION}" ]]
+          printf 'project version %s\n' "${PACKAGE_VERSION}"
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: web
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright UI tests
+        working-directory: web
+        run: npm run test:ui
+
+      - name: Test Go packages
+        run: go test ./...
+
+      - name: Test Go packages with race detector
+        run: go test -race ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Build Linux amd64 binary
+        env:
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          test "$(go env GOOS)/$(go env GOARCH)" = "linux/amd64"
+          go build -trimpath -ldflags="-s -w" -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
+          ./dist/hy2panel-linux-amd64 version --json | jq -e '.version == "0.5.0"' >/dev/null
+
+      - name: Check formatting and generated changes
+        run: |
+          git diff --check
+          git diff --exit-code
+
+  shell-and-systemd:
+    name: Shell and systemd checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Install shellcheck and systemd dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck nftables jq
+
+      - name: Check every Bash script
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -d '' scripts < <(find scripts -type f \( -name '*.sh' -o -name 'hy2' \) -print0 | sort -z)
+          ((${#scripts[@]} > 0))
+          bash -n "${scripts[@]}"
+          shellcheck --shell=bash --severity=warning "${scripts[@]}"
+          bash scripts/tests/transaction-locks.sh
+
+      - name: Verify every systemd unit
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          created=()
+          cleanup() {
+            if ((${#created[@]} > 0)); then
+              sudo rm -f -- "${created[@]}"
+              sudo rmdir --ignore-fail-on-non-empty /usr/local/lib/hy2panel/sing-box/current /usr/local/lib/hy2panel/sing-box /usr/local/lib/hy2panel 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          mapfile -t commands < <(
+            grep -hE '^(ExecStart|ExecStartPre|ExecStop)=' systemd/* |
+              sed -E 's/^[^=]+=(-)?([^[:space:]]+).*/\2/' |
+              sort -u
+          )
+          for command in "${commands[@]}"; do
+            [[ ${command} == /* ]] || continue
+            if [[ ! -x ${command} ]]; then
+              sudo install -D -m 0755 /bin/true "${command}"
+              created+=("${command}")
+            fi
+          done
+
+          systemd-analyze verify systemd/*.path systemd/*.service systemd/*.timer
+
+  sing-box-matrix:
+    name: Read sing-box allowlist
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.manifest.outputs.matrix }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Validate manifest and create matrix
+        id: manifest
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          manifest=packaging/sing-box-versions.json
+          jq -e '
+            .schema == 1 and
+            .platform == "linux-amd64" and
+            (.versions | type == "array" and length > 0) and
+            ([.versions[] | select(.status == "recommended")] | length) == 1 and
+            all(.versions[];
+              (.version | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              .tag == ("v" + .version) and
+              (.status == "recommended" or .status == "supported") and
+              .asset_name == ("sing-box-" + .version + "-linux-amd64.tar.gz") and
+              (.size | type == "number" and . > 0) and
+              (.sha256 | test("^[0-9a-f]{64}$")) and
+              .release_url == ("https://github.com/SagerNet/sing-box/releases/tag/" + .tag)
+            ) and
+            ([.versions[].version] | unique | length) == (.versions | length) and
+            ([.versions[].asset_name] | unique | length) == (.versions | length)
+          ' "${manifest}" >/dev/null
+          matrix="$(jq -c '{include: [.versions[] | {version, tag, asset_name, size, sha256}]}' "${manifest}")"
+          printf 'matrix=%s\n' "${matrix}" >> "${GITHUB_OUTPUT}"
+
+  sing-box-compatibility:
+    name: sing-box ${{ matrix.version }} compatibility
+    needs: sing-box-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.sing-box-matrix.outputs.matrix) }}
+    env:
+      SING_BOX_VERSION: ${{ matrix.version }}
+      SING_BOX_TAG: ${{ matrix.tag }}
+      SING_BOX_ASSET: ${{ matrix.asset_name }}
+      SING_BOX_SIZE: ${{ matrix.size }}
+      SING_BOX_SHA256: ${{ matrix.sha256 }}
+    steps:
+      - name: Download and verify allowlisted asset
+        id: binary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          printf 'work=%s\n' "${work}" >> "${GITHUB_OUTPUT}"
+          archive="${work}/${SING_BOX_ASSET}"
+          url="https://github.com/SagerNet/sing-box/releases/download/${SING_BOX_TAG}/${SING_BOX_ASSET}"
+          curl --fail --location --proto '=https' --proto-redir '=https' \
+            --connect-timeout 20 --max-time 300 --retry 3 --retry-all-errors \
+            "${url}" -o "${archive}"
+
+          actual_size="$(stat --format='%s' "${archive}")"
+          [[ ${actual_size} == "${SING_BOX_SIZE}" ]]
+          actual_sha256="$(sha256sum "${archive}" | cut -d' ' -f1)"
+          [[ ${actual_sha256} == "${SING_BOX_SHA256}" ]]
+
+          member="sing-box-${SING_BOX_VERSION}-linux-amd64/sing-box"
+          [[ $(tar -tzf "${archive}" | grep -Fxc "${member}") -eq 1 ]]
+          mkdir "${work}/binary"
+          tar -xzf "${archive}" -C "${work}/binary" --strip-components=1 -- "${member}"
+          binary="${work}/binary/sing-box"
+          [[ -f ${binary} && ! -L ${binary} ]]
+          chmod 0755 "${binary}"
+
+          version_output="$("${binary}" version 2>&1)"
+          printf '%s\n' "${version_output}"
+          reported="$(sed -nE 's/^sing-box version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"${version_output}" | head -n 1)"
+          [[ ${reported} == "${SING_BOX_VERSION}" ]]
+          printf 'binary=%s\n' "${binary}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check Reality-only, Hysteria2-only, and dual configs
+        shell: bash
+        env:
+          SING_BOX_BINARY: ${{ steps.binary.outputs.binary }}
+          WORK_DIR: ${{ steps.binary.outputs.work }}
+        run: |
+          set -Eeuo pipefail
+          trap 'rm -rf "${WORK_DIR}"' EXIT
+
+          keypair="$("${SING_BOX_BINARY}" generate reality-keypair)"
+          private_key="$(sed -n 's/^PrivateKey:[[:space:]]*//p' <<<"${keypair}" | tr -d '\r')"
+          [[ ${private_key} =~ ^[A-Za-z0-9_-]{43}$ ]]
+
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
+            -keyout "${WORK_DIR}/hy2.key" -out "${WORK_DIR}/hy2.crt" -days 1 \
+            -subj '/CN=hy2.example.test' \
+            -addext 'subjectAltName=DNS:hy2.example.test' >/dev/null 2>&1
+
+          jq -n --arg private_key "${private_key}" '{
+            type: "vless",
+            tag: "reality",
+            listen: "::",
+            listen_port: 24443,
+            users: [{uuid: "11111111-1111-4111-8111-111111111111", flow: "xtls-rprx-vision"}],
+            tls: {
+              enabled: true,
+              server_name: "www.microsoft.com",
+              reality: {
+                enabled: true,
+                handshake: {server: "www.microsoft.com", server_port: 443},
+                private_key: $private_key,
+                short_id: ["0123456789abcdef"]
+              }
+            }
+          }' > "${WORK_DIR}/reality-inbound.json"
+
+          jq -n --arg cert "${WORK_DIR}/hy2.crt" --arg key "${WORK_DIR}/hy2.key" '{
+            type: "hysteria2",
+            tag: "hysteria2",
+            listen: "::",
+            listen_port: 24443,
+            users: [{password: "compatibility-password-123456"}],
+            up_mbps: 100,
+            down_mbps: 100,
+            tls: {
+              enabled: true,
+              certificate_path: $cert,
+              key_path: $key,
+              alpn: ["h3"]
+            }
+          }' > "${WORK_DIR}/hysteria2-inbound.json"
+
+          config_filter='{
+            log: {level: "warn", timestamp: true},
+            inbounds: .,
+            outbounds: [{type: "direct", tag: "direct"}],
+            experimental: {
+              clash_api: {
+                external_controller: "127.0.0.1:19090",
+                secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+              }
+            }
+          }'
+          jq -s "${config_filter}" "${WORK_DIR}/reality-inbound.json" > "${WORK_DIR}/reality.json"
+          jq -s "${config_filter}" "${WORK_DIR}/hysteria2-inbound.json" > "${WORK_DIR}/hysteria2.json"
+          jq -s "${config_filter}" \
+            "${WORK_DIR}/reality-inbound.json" "${WORK_DIR}/hysteria2-inbound.json" \
+            > "${WORK_DIR}/dual.json"
+
+          for config in reality hysteria2 dual; do
+            printf 'checking %s config with sing-box %s\n' "${config}" "${SING_BOX_VERSION}"
+            "${SING_BOX_BINARY}" check -c "${WORK_DIR}/${config}.json"
+          done

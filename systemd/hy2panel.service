@@ -1,8 +1,8 @@
 [Unit]
 Description=hy2panel management UI
-After=network-online.target hy2panel-firewall.service
+After=network-online.target hy2panel-recover.service
 Wants=network-online.target
-Requires=hy2panel-firewall.service
+Requires=hy2panel-recover.service
 
 [Service]
 Type=simple
@@ -23,7 +23,20 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-ReadWritePaths=/etc/hy2panel
+StateDirectory=hy2panel
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/hy2panel
+ReadWritePaths=/etc/hy2panel/panel.json
+ReadWritePaths=/etc/hy2panel/panel.pending.json
+ReadWritePaths=/etc/hy2panel/sing-box.pending.json
+ReadWritePaths=/etc/hy2panel/apply.request
+ReadWritePaths=/etc/hy2panel/apply.result
+ReadWritePaths=/etc/hy2panel/bbr.request
+ReadWritePaths=/etc/hy2panel/bbr.result
+ReadWritePaths=/etc/hy2panel/upgrade.request
+ReadWritePaths=/etc/hy2panel/upgrade.result
+ReadWritePaths=/etc/hy2panel/sing-box-update.request
+ReadWritePaths=/etc/hy2panel/sing-box-update.result
 
 [Install]
 WantedBy=multi-user.target

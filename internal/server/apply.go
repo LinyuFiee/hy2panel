@@ -2,23 +2,38 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
+
+	"hy2panel/internal/config"
 )
 
 type Applier interface {
-	Apply(context.Context, []byte) error
+	Apply(context.Context, *config.Config, []byte) error
 }
 
 type FileApplier struct {
 	Dir string
 }
 
-func (a FileApplier) Apply(ctx context.Context, singBoxConfig []byte) error {
+func (a FileApplier) Apply(ctx context.Context, panelConfig *config.Config, singBoxConfig []byte) error {
+	if panelConfig == nil {
+		return errors.New("面板候选配置不能为空")
+	}
+	panelData, err := json.MarshalIndent(panelConfig, "", "  ")
+	if err != nil {
+		return err
+	}
+	panelData = append(panelData, '\n')
+	panelPending := filepath.Join(a.Dir, "panel.pending.json")
 	pending := filepath.Join(a.Dir, "sing-box.pending.json")
 	request := filepath.Join(a.Dir, "apply.request")
 	result := filepath.Join(a.Dir, "apply.result")
@@ -28,10 +43,22 @@ func (a FileApplier) Apply(ctx context.Context, singBoxConfig []byte) error {
 	if err := os.Remove(request); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if err := atomicWrite(panelPending, panelData, 0o600); err != nil {
+		return err
+	}
 	if err := atomicWrite(pending, singBoxConfig, 0o600); err != nil {
 		return err
 	}
-	if err := atomicWrite(request, []byte("apply\n"), 0o600); err != nil {
+	operationID, err := newOperationID()
+	if err != nil {
+		return err
+	}
+	requestData, err := json.Marshal(map[string]any{"schema": 1, "id": operationID, "action": "apply"})
+	if err != nil {
+		return err
+	}
+	requestData = append(requestData, '\n')
+	if err := atomicWrite(request, requestData, 0o600); err != nil {
 		return err
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -53,6 +80,20 @@ func (a FileApplier) Apply(ctx context.Context, singBoxConfig []byte) error {
 				return err
 			}
 			message := strings.TrimSpace(string(data))
+			var structured struct {
+				ID      string `json:"id"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			}
+			if json.Unmarshal(data, &structured) == nil && structured.ID != "" {
+				if structured.ID != operationID {
+					continue
+				}
+				if structured.Status == "succeeded" {
+					return nil
+				}
+				message = structured.Message
+			}
 			if message == "ok" {
 				return nil
 			}
@@ -65,6 +106,14 @@ func (a FileApplier) Apply(ctx context.Context, singBoxConfig []byte) error {
 			return fmt.Errorf("配置应用失败: %s", message)
 		}
 	}
+}
+
+func newOperationID() (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(value), nil
 }
 
 func atomicWrite(path string, data []byte, mode os.FileMode) error {
@@ -90,5 +139,16 @@ func atomicWrite(path string, data []byte, mode os.FileMode) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempPath, path)
+	if err := os.Rename(tempPath, path); err != nil {
+		return err
+	}
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }

@@ -7,25 +7,34 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"hy2panel/internal/config"
 	"hy2panel/internal/store"
+	"hy2panel/internal/version"
 )
 
 type fakeApplier struct {
 	calls int
 	data  []byte
 	err   error
+	store *store.Store
 }
 
-func (f *fakeApplier) Apply(_ context.Context, data []byte) error {
+func (f *fakeApplier) Apply(_ context.Context, cfg *config.Config, data []byte) error {
 	f.calls++
 	f.data = append([]byte(nil), data...)
-	return f.err
+	if f.err != nil {
+		return f.err
+	}
+	if f.store != nil {
+		return f.store.Save(cfg)
+	}
+	return nil
 }
 
 func newTestServer(t *testing.T) (*Server, *fakeApplier, http.Handler, *store.Store, *config.Config) {
@@ -38,9 +47,9 @@ func newTestServer(t *testing.T) (*Server, *fakeApplier, http.Handler, *store.St
 	if err := panelStore.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	applier := &fakeApplier{}
+	applier := &fakeApplier{store: panelStore}
 	panelServer := New(panelStore, applier)
-	handler := panelServer.routes(netip.MustParsePrefix(cfg.Panel.AdminCIDR))
+	handler := panelServer.routes()
 	return panelServer, applier, handler, panelStore, cfg
 }
 
@@ -74,23 +83,87 @@ func loginCookie(t *testing.T, handler http.Handler) *http.Cookie {
 	return nil
 }
 
-func TestWhitelist(t *testing.T) {
+func TestNoManagementIPRestrictionAndHealthMetadata(t *testing.T) {
 	_, _, handler, _, _ := newTestServer(t)
-	for _, test := range []struct {
-		remote string
-		status int
-	}{
-		{"198.51.100.20:1000", http.StatusOK},
-		{"[::ffff:198.51.100.20]:1000", http.StatusOK},
-		{"198.51.100.21:1000", http.StatusForbidden},
+	for _, remote := range []string{
+		"198.51.100.20:1000",
+		"[::ffff:198.51.100.20]:1000",
+		"203.0.113.99:1000",
 	} {
 		request := adminRequest(http.MethodGet, "/api/health", nil)
-		request.RemoteAddr = test.remote
+		request.RemoteAddr = remote
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
-		if response.Code != test.status {
-			t.Fatalf("remote %s: expected %d, got %d", test.remote, test.status, response.Code)
+		if response.Code != http.StatusOK {
+			t.Fatalf("remote %s: got %d", remote, response.Code)
 		}
+		var health struct {
+			Status        string `json:"status"`
+			Version       string `json:"version"`
+			ConfigVersion int    `json:"config_version"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &health); err != nil {
+			t.Fatal(err)
+		}
+		if health.Status != "ok" || health.Version != version.Version || health.ConfigVersion != config.SchemaVersion {
+			t.Fatalf("unexpected health response: %#v", health)
+		}
+	}
+}
+
+func loginRequest(remote, password string) *http.Request {
+	request := adminRequest(http.MethodPost, "/api/login", []byte(`{"password":"`+password+`"}`))
+	request.RemoteAddr = remote
+	request.Header.Set("X-Requested-With", "fetch")
+	return request
+}
+
+func TestLoginRateLimitUsesRemoteAddrOnly(t *testing.T) {
+	panelServer, _, handler, _, _ := newTestServer(t)
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	panelServer.auth = newAuthenticatorWithClock(func() time.Time { return now })
+	for i := 0; i < maxLoginFailures; i++ {
+		request := loginRequest("198.51.100.7:1234", "wrong-password")
+		request.Header.Set("X-Forwarded-For", "203.0.113."+strconv.Itoa(i+1))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		expected := http.StatusUnauthorized
+		if i == maxLoginFailures-1 {
+			expected = http.StatusTooManyRequests
+		}
+		if response.Code != expected {
+			t.Fatalf("failure %d: expected %d, got %d: %s", i+1, expected, response.Code, response.Body.String())
+		}
+		if expected == http.StatusTooManyRequests && response.Header().Get("Retry-After") != strconv.Itoa(int(loginWindow.Seconds())) {
+			t.Fatalf("unexpected Retry-After: %q", response.Header().Get("Retry-After"))
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, loginRequest("203.0.113.7:1234", "test-password-123456"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("different source was limited: %d %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, loginRequest("[::ffff:198.51.100.7]:4321", "test-password-123456"))
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("mapped source bypassed limit: %d %s", response.Code, response.Body.String())
+	}
+	now = now.Add(loginWindow)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, loginRequest("198.51.100.7:1234", "test-password-123456"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expired rate limit remained active: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestLoginRejectsInvalidRemoteAddress(t *testing.T) {
+	_, _, handler, _, _ := newTestServer(t)
+	request := loginRequest("not-an-address", "test-password-123456")
+	request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid RemoteAddr was accepted via forwarding header: %d", response.Code)
 	}
 }
 
@@ -107,6 +180,9 @@ func TestLoginAndStateDoNotExposeHash(t *testing.T) {
 	body := response.Body.String()
 	if strings.Contains(body, cfg.AdminPasswordHash) || strings.Contains(body, "admin_password_hash") {
 		t.Fatal("state response exposed password hash")
+	}
+	if strings.Contains(body, cfg.Telemetry.Secret) || strings.Contains(body, "admin_cidr") {
+		t.Fatal("state response exposed telemetry secret or deprecated admin CIDR")
 	}
 	if !strings.Contains(body, "vless://") || !strings.Contains(body, "hysteria2://") {
 		t.Fatal("state response missing client links")

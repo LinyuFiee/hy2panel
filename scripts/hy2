@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+require_root() {
+  if [[ ${EUID} -ne 0 ]]; then
+    printf '该操作需要 root 权限。\n' >&2
+    exit 1
+  fi
+}
+
+usage() {
+  cat <<'EOF'
+用法: hy2 <命令>
+
+  status                         查看面板和节点状态
+  info                           显示面板地址、版本与核心版本
+  logs [panel|sing-box|watchdog|apply|upgrade]
+  restart [panel|proxy|all]      重启固定服务
+  check                          检查面板与 sing-box 配置
+  passwd                         重置管理员密码并注销现有会话
+  backup [文件]                  创建加密信息敏感的 0600 备份
+  restore <文件>                 校验并恢复备份
+  sing-box list                  查看允许及当前核心版本
+  sing-box set <版本>            安装并切换受支持版本
+  sing-box rollback              回滚到上一核心版本
+  update                         请求升级到已检测的目标版本
+  uninstall [--purge-data]       保守卸载
+EOF
+}
+
+menu() {
+  cat <<'EOF'
+
+hy2panel 管理菜单
+  1. 查看状态
+  2. 查看信息
+  3. 查看日志
+  4. 重启面板与节点
+  5. 检查配置
+  6. 重置管理员密码
+  7. 创建备份
+  8. 恢复备份
+  9. 管理 sing-box 版本
+ 10. 更新面板
+ 11. 卸载
+  0. 退出
+EOF
+  read -r -p '请选择: ' choice
+  case ${choice} in
+    1) set -- status ;;
+    2) set -- info ;;
+    3) set -- logs ;;
+    4) set -- restart all ;;
+    5) set -- check ;;
+    6) set -- passwd ;;
+    7) set -- backup ;;
+    8) read -r -p '备份文件路径: ' archive; set -- restore "${archive}" ;;
+    9) set -- sing-box list ;;
+    10) set -- update ;;
+    11) set -- uninstall ;;
+    0) exit 0 ;;
+    *) printf '无效选择。\n' >&2; exit 2 ;;
+  esac
+  dispatch "$@"
+}
+
+status() {
+  systemctl --no-pager --full status hy2panel.service sing-box.service || true
+}
+
+info() {
+  local domain panel_version core_version
+  domain="$(jq -r '.panel.domain' /etc/hy2panel/panel.json)"
+  panel_version="$(/usr/local/bin/hy2panel version --json | jq -r '.version')"
+  core_version="$(/usr/local/bin/sing-box version 2>/dev/null | sed -nE 's/^sing-box version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n1)"
+  printf '面板: https://%s:8443\n面板版本: %s\nsing-box: %s\n' "${domain}" "${panel_version}" "${core_version:-未知}"
+}
+
+logs() {
+  local name=${1:-panel} unit
+  case ${name} in
+    panel) unit=hy2panel.service ;;
+    sing-box) unit=sing-box.service ;;
+    watchdog) unit=hy2panel-watchdog.service ;;
+    apply) unit=hy2panel-apply.service ;;
+    upgrade) unit=hy2panel-upgrade.service ;;
+    *) printf '不支持的日志单元。\n' >&2; exit 2 ;;
+  esac
+  journalctl -u "${unit}" -n 150 --no-pager
+}
+
+restart_services() {
+  require_root
+  case ${1:-all} in
+    panel) systemctl restart hy2panel.service ;;
+    proxy) systemctl restart sing-box.service ;;
+    all) systemctl restart sing-box.service hy2panel.service ;;
+    *) printf '仅支持 panel、proxy 或 all。\n' >&2; exit 2 ;;
+  esac
+}
+
+check_config() {
+  /usr/local/bin/hy2panel check --config /etc/hy2panel/panel.json
+  /usr/local/bin/sing-box check -c /etc/hy2panel/sing-box.json
+}
+
+reset_password() {
+  require_root
+  local first second backup
+  read -r -s -p '新密码（12-128 个字符）: ' first
+  printf '\n'
+  read -r -s -p '再次输入新密码: ' second
+  printf '\n'
+  [[ ${first} == "${second}" ]] || { printf '两次密码不一致。\n' >&2; exit 1; }
+  backup="$(mktemp /etc/hy2panel/.panel-before-password.XXXXXX)"
+  cp -a /etc/hy2panel/panel.json "${backup}"
+  systemctl stop hy2panel.service
+  if printf '%s' "${first}" | runuser -u hy2panel -- /usr/local/bin/hy2panel reset-password --config /etc/hy2panel/panel.json; then
+    install -o root -g root -m 600 /dev/null /root/hy2panel-credentials
+    printf '面板地址: https://%s:8443\n管理员密码: %s\n' "$(jq -r '.panel.domain' /etc/hy2panel/panel.json)" "${first}" > /root/hy2panel-credentials
+    systemctl start hy2panel.service
+    rm -f "${backup}"
+    printf '管理员密码已更新，旧会话已失效。\n'
+  else
+    install -o hy2panel -g hy2panel -m 600 "${backup}" /etc/hy2panel/panel.json
+    systemctl start hy2panel.service || true
+    rm -f "${backup}"
+    printf '密码更新失败，已恢复旧配置。\n' >&2
+    exit 1
+  fi
+}
+
+sing_box() {
+  require_root
+  case ${1:-list} in
+    list)
+      jq '{recommended:[.versions[]|select(.status=="recommended")|.version][0],versions:[.versions[]|{version,status}]}' /usr/local/share/hy2panel/sing-box-versions.json
+      [[ ! -f /var/lib/hy2panel-system/sing-box/state.json ]] || jq '{current_version,previous_version,operation}' /var/lib/hy2panel-system/sing-box/state.json
+      ;;
+    set)
+      [[ -n ${2:-} ]] || { printf '请指定版本。\n' >&2; exit 2; }
+      submit_sing_box switch "${2}"
+      ;;
+    rollback) submit_sing_box rollback "" ;;
+    *) printf '仅支持 list、set 或 rollback。\n' >&2; exit 2 ;;
+  esac
+}
+
+submit_sing_box() {
+  local action=$1 target=$2 id request
+  id="$(openssl rand -hex 16)"
+  request="$(mktemp /etc/hy2panel/.sing-box-request.XXXXXX)"
+  jq -n --arg id "${id}" --arg action "${action}" --arg target "${target}" '{schema:1,id:$id,action:$action,target_version:$target}' > "${request}"
+  chown hy2panel:hy2panel "${request}"
+  chmod 600 "${request}"
+  mv "${request}" /etc/hy2panel/sing-box-update.request
+  systemctl start hy2panel-sing-box.service
+  jq . /etc/hy2panel/sing-box-update.result
+}
+
+request_update() {
+  require_root
+  local state target id request
+  state="$(curl -fsS --unix-socket /run/hy2panel/admin.sock http://localhost/internal/update-target 2>/dev/null || true)"
+  target="$(jq -r '.target_version // empty' <<<"${state}")"
+  if [[ -z ${target} ]]; then
+    read -r -p '目标面板版本（X.Y.Z）: ' target
+  fi
+  [[ ${target} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf '版本格式无效。\n' >&2; exit 2; }
+  id="$(openssl rand -hex 16)"
+  request="$(mktemp /etc/hy2panel/.upgrade-request.XXXXXX)"
+  jq -n --arg id "${id}" --arg target "${target}" '{schema:1,id:$id,action:"upgrade",target_version:$target}' > "${request}"
+  chown hy2panel:hy2panel "${request}"
+  chmod 600 "${request}"
+  mv "${request}" /etc/hy2panel/upgrade.request
+  systemctl start hy2panel-upgrade.service
+  jq . /etc/hy2panel/upgrade.result
+}
+
+dispatch() {
+  case ${1:-} in
+    status) status ;;
+    info) info ;;
+    logs) shift; logs "${1:-panel}" ;;
+    restart) shift; restart_services "${1:-all}" ;;
+    check) check_config ;;
+    passwd) reset_password ;;
+    backup) require_root; shift; /usr/local/sbin/hy2panel-backup "${1:-}" ;;
+    restore) require_root; shift; [[ -n ${1:-} ]] || { usage; exit 2; }; /usr/local/sbin/hy2panel-restore "$1" ;;
+    sing-box) shift; sing_box "$@" ;;
+    update) request_update ;;
+    uninstall) require_root; shift; /usr/local/sbin/hy2panel-uninstall "$@" ;;
+    help|-h|--help) usage ;;
+    '') [[ -t 0 ]] && menu || usage ;;
+    *) usage; exit 2 ;;
+  esac
+}
+
+dispatch "$@"

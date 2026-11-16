@@ -1,13 +1,15 @@
 [Unit]
 Description=sing-box proxy service
-After=network-online.target
+After=network-online.target hy2panel-recover.service
 Wants=network-online.target
+Requires=hy2panel-recover.service
 
 [Service]
 Type=simple
 User=hy2panel
 Group=hy2panel
-ExecStart=/usr/local/bin/sing-box run -c /etc/hy2panel/sing-box.json
+ExecStartPre=/usr/local/lib/hy2panel/sing-box/current/sing-box check -c /etc/hy2panel/sing-box.json
+ExecStart=/usr/local/lib/hy2panel/sing-box/current/sing-box run -c /etc/hy2panel/sing-box.json
 Restart=on-failure
 RestartSec=3s
 LimitNOFILE=65536

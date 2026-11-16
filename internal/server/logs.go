@@ -65,6 +65,7 @@ func redactSecrets(value string, cfg *config.Config) string {
 		cfg.AdminPasswordHash,
 		cfg.RackNerd.APIKey,
 		cfg.RackNerd.APIHash,
+		cfg.Telemetry.Secret,
 		cfg.Reality.UUID,
 		cfg.Reality.PrivateKey,
 		cfg.Reality.PublicKey,
