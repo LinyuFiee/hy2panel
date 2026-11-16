@@ -22,7 +22,7 @@ fi
 BACKUP="/root/hy2panel-backups/pre-uninstall-$(date -u +%Y%m%d-%H%M%S).tar.gz"
 export HY2PANEL_MAINTENANCE_LOCK_HELD=1
 /usr/local/sbin/hy2panel-backup "${BACKUP}"
-printf '即将卸载项目服务。系统软件包、swap、fstab 和 Let’s Encrypt 账户不会被删除。\n备份：%s\n' "${BACKUP}"
+printf '即将卸载项目服务。系统软件包、swap、fstab 和 Let\x27s Encrypt 账户不会被删除。\n备份：%s\n' "${BACKUP}"
 if [[ -t 0 ]]; then
   read -r -p '输入 uninstall 确认: ' confirmation
   [[ ${confirmation} == uninstall ]] || { printf '已取消。\n'; exit 0; }
@@ -67,7 +67,7 @@ if [[ ${PURGE} -eq 1 ]]; then
   if id hy2panel >/dev/null 2>&1; then
     userdel hy2panel >/dev/null 2>&1 || true
   fi
-  printf '项目数据已清除；Let’s Encrypt 原始证书和账户仍保留。\n'
+  printf '项目数据已清除；Let\x27s Encrypt 原始证书和账户仍保留。\n'
 else
   printf '配置和运行数据已保留。若确认不再需要，可检查后手动删除 /etc/hy2panel 与 /var/lib/hy2panel。\n'
 fi

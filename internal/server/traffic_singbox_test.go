@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,19 +29,19 @@ func TestTrafficEndpointsRequireAuthenticationAndReturnSnapshots(t *testing.T) {
 		t.Fatalf("expected unauthorized, got %d", response.Code)
 	}
 
-	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
-	calls := 0
+	clock := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	var calls atomic.Int64
 	source := trafficSourceFunc(func(context.Context) (traffic.ClashSnapshot, error) {
-		calls++
+		call := calls.Add(1)
 		return traffic.ClashSnapshot{
-			UploadTotal:   uint64(100 + calls*40),
-			DownloadTotal: uint64(200 + calls*80),
+			UploadTotal:   uint64(100 + call*40),
+			DownloadTotal: uint64(200 + call*80),
 			Connections: []traffic.ClashConnection{{
-				ID: "reality-flow", Metadata: traffic.ClashMetadata{Type: "vless/reality"}, Upload: uint64(10 + calls*40), Download: uint64(20 + calls*80), Start: now.Add(-time.Minute),
+				ID: "reality-flow", Metadata: traffic.ClashMetadata{Type: "vless/reality"}, Upload: uint64(10 + call*40), Download: uint64(20 + call*80), Start: clock.Add(-time.Minute),
 			}},
 		}, nil
 	})
-	collector, err := traffic.NewCollector(source, nil, traffic.WithClock(func() time.Time { return now }))
+	collector, err := traffic.NewCollector(source, nil, traffic.WithClock(func() time.Time { return clock }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,6 @@ func TestTrafficEndpointsRequireAuthenticationAndReturnSnapshots(t *testing.T) {
 	go func() { _ = collector.Run(ctx) }()
 	t.Cleanup(cancel)
 	time.Sleep(20 * time.Millisecond)
-	now = now.Add(time.Second)
 	panelServer.traffic = collector
 	panelServer.trafficErr = ""
 
