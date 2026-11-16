@@ -233,9 +233,7 @@ verify_bundle() {
   local base_url="https://github.com/${REPOSITORY}/releases/download/v${TARGET_VERSION}"
   curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${base_url}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
   curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${base_url}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
-  [[ $(wc -l < "${WORK_DIR}/${BUNDLE}.sha256") -eq 1 ]]
-  grep -Eq "^[0-9a-f]{64}  ${BUNDLE}$" "${WORK_DIR}/${BUNDLE}.sha256"
-  (cd "${WORK_DIR}" && sha256sum -c "${BUNDLE}.sha256")
+  hy2panel_verify_sha256_file "${WORK_DIR}/${BUNDLE}.sha256" "${BUNDLE}" "${WORK_DIR}"
   hy2panel_archive_members_safe "${WORK_DIR}/${BUNDLE}"
   mkdir "${WORK_DIR}/bundle"
   tar -xzf "${WORK_DIR}/${BUNDLE}" -C "${WORK_DIR}/bundle" --no-same-owner --no-same-permissions

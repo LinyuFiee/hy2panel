@@ -119,6 +119,7 @@ jobs:
           bash -n "${scripts[@]}"
           shellcheck --shell=bash --severity=warning "${scripts[@]}"
           bash scripts/tests/transaction-locks.sh
+          bash scripts/tests/checksum-format.sh
 
       - name: Verify every systemd unit
         shell: bash

@@ -111,6 +111,29 @@ hy2panel_panel_healthy() {
   fi
 }
 
+hy2panel_verify_sha256_file() {
+  local checksum_file=$1 expected_name=$2 directory=$3
+  local digest marker filename actual file_size expected_size
+  local -a checksum_lines=()
+  [[ ${expected_name} =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  [[ -f ${checksum_file} && ! -L ${checksum_file} ]] || return 1
+  [[ -f ${directory}/${expected_name} && ! -L ${directory}/${expected_name} ]] || return 1
+  file_size="$(wc -c < "${checksum_file}")" || return 1
+  expected_size=$((64 + 2 + ${#expected_name} + 1))
+  [[ ${file_size} -eq ${expected_size} || ${file_size} -eq $((expected_size + 1)) ]] || return 1
+  mapfile -t checksum_lines < "${checksum_file}"
+  [[ ${#checksum_lines[@]} -eq 1 ]] || return 1
+  checksum_lines[0]="${checksum_lines[0]%$'\r'}"
+  [[ ${checksum_lines[0]} =~ ^([0-9a-f]{64})(\ \ |\ \*)([^/\\]+)$ ]] || return 1
+  digest=${BASH_REMATCH[1]}
+  marker=${BASH_REMATCH[2]}
+  filename=${BASH_REMATCH[3]}
+  [[ ${marker} == "  " || ${marker} == " *" ]] || return 1
+  [[ ${filename} == "${expected_name}" ]] || return 1
+  actual="$(sha256sum "${directory}/${expected_name}" | cut -d' ' -f1)" || return 1
+  [[ ${actual} == "${digest}" ]]
+}
+
 hy2panel_archive_members_safe() {
   local archive=$1 listing verbose name
   listing="$(mktemp)"
