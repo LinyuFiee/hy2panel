@@ -149,6 +149,7 @@ install_version() {
   entry="$(manifest_entry "${version}")"
   archive="$(safe_download "${entry}")"
   staging="$(mktemp -d "${VERSIONS}/.${version}.XXXXXX")"
+  chmod 755 "${staging}"
   member="sing-box-${version}-linux-amd64/sing-box"
   tar -xzf "${archive}" -C "${staging}" --no-same-owner --no-same-permissions --strip-components=1 -- "${member}"
   binary="${staging}/sing-box"
@@ -185,6 +186,7 @@ migrate_legacy() {
   version="${reported:-legacy-${digest:0:12}}"
   destination="${VERSIONS}/${version}"
   install -d -o root -g root -m 755 "${destination}"
+  chmod 755 "${VERSIONS}" "${destination}"
   install -o root -g root -m 755 "${legacy}" "${destination}/sing-box"
   atomic_link "versions/${version}" "${ROOT}/current"
   rm -f "${legacy}"
@@ -218,6 +220,7 @@ prune_versions() {
 
 initialize() {
   install -d -o root -g root -m 755 "${ROOT}" "${VERSIONS}"
+  chmod 755 "${ROOT}" "${VERSIONS}"
   install -d -o root -g hy2panel -m 750 "$(dirname -- "${STATE_ROOT}")" "${STATE_ROOT}"
   install -d -o root -g root -m 700 "${TRANSACTIONS}"
   verify_manifest

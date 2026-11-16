@@ -88,7 +88,8 @@ jobs:
           mkdir -p dist
           test "$(go env GOOS)/$(go env GOARCH)" = "linux/amd64"
           go build -trimpath -ldflags="-s -w" -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
-          ./dist/hy2panel-linux-amd64 version --json | jq -e '.version == "0.5.0"' >/dev/null
+          SOURCE_VERSION="$(sed -nE 's/^[[:space:]]*var[[:space:]]+Version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' internal/version/version.go)"
+          ./dist/hy2panel-linux-amd64 version --json | jq -e --arg version "${SOURCE_VERSION}" '.version == $version' >/dev/null
 
       - name: Check formatting and generated changes
         run: |
@@ -120,6 +121,8 @@ jobs:
           shellcheck --shell=bash --severity=warning "${scripts[@]}"
           bash scripts/tests/transaction-locks.sh
           bash scripts/tests/checksum-format.sh
+          bash scripts/tests/line-endings.sh
+          bash scripts/tests/install-permissions.sh
 
       - name: Verify every systemd unit
         shell: bash

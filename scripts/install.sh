@@ -58,7 +58,7 @@ tar -xzf "${WORK_DIR}/${LIBRESPEED_ARCHIVE}" -C "${WORK_DIR}" --no-same-owner --
 if ! id hy2panel >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/hy2panel --shell /usr/sbin/nologin hy2panel
 fi
-install -d -o root -g hy2panel -m 1730 /etc/hy2panel
+install -d -o root -g hy2panel -m 1770 /etc/hy2panel
 install -d -o root -g hy2panel -m 750 /etc/hy2panel/certs /var/lib/hy2panel-system /var/lib/hy2panel-system/sing-box
 install -d -o hy2panel -g hy2panel -m 700 /var/lib/hy2panel
 install -d -o root -g root -m 700 /var/lib/hy2panel-system/transactions
