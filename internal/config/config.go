@@ -22,13 +22,26 @@ import (
 
 var hostLabel = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 
+const (
+	SchemaVersion          = 1
+	defaultTelemetryListen = "127.0.0.1:19090"
+	adminPasswordMinLength = 12
+	adminPasswordMaxLength = 128
+)
+
 type Panel struct {
 	Listen     string `json:"listen"`
 	Domain     string `json:"domain"`
-	AdminCIDR  string `json:"admin_cidr"`
+	AdminCIDR  string `json:"admin_cidr,omitempty"`
 	PublicHost string `json:"public_host"`
 	CertFile   string `json:"cert_file"`
 	KeyFile    string `json:"key_file"`
+}
+
+type Telemetry struct {
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"`
+	Secret  string `json:"secret,omitempty"`
 }
 
 type Reality struct {
@@ -70,17 +83,26 @@ type Config struct {
 	Version           int       `json:"version"`
 	AdminPasswordHash string    `json:"admin_password_hash,omitempty"`
 	Panel             Panel     `json:"panel"`
+	Telemetry         Telemetry `json:"telemetry"`
 	Reality           Reality   `json:"reality"`
 	Hysteria2         Hysteria2 `json:"hysteria2"`
 	RackNerd          RackNerd  `json:"racknerd"`
 	Recovery          Recovery  `json:"recovery"`
 }
 
-func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Config, error) {
-	if len(password) < 12 || len(password) > 128 {
-		return nil, errors.New("管理员密码长度必须为 12 到 128 个字符")
+func HashAdminPassword(password string) (string, error) {
+	if len(password) < adminPasswordMinLength || len(password) > adminPasswordMaxLength {
+		return "", fmt.Errorf("管理员密码长度必须为 %d 到 %d 个字符", adminPasswordMinLength, adminPasswordMaxLength)
 	}
-	prefix, err := parsePrefix(adminIP)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func Initial(panelDomain, hy2Domain, publicHost, _ string, password string) (*Config, error) {
+	hash, err := HashAdminPassword(password)
 	if err != nil {
 		return nil, err
 	}
@@ -100,20 +122,24 @@ func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Con
 	if err != nil {
 		return nil, err
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	telemetrySecret, err := randomToken(32)
 	if err != nil {
 		return nil, err
 	}
 	c := &Config{
-		Version:           1,
-		AdminPasswordHash: string(hash),
+		Version:           SchemaVersion,
+		AdminPasswordHash: hash,
 		Panel: Panel{
 			Listen:     ":8443",
 			Domain:     panelDomain,
-			AdminCIDR:  prefix.String(),
 			PublicHost: publicHost,
 			CertFile:   "/etc/hy2panel/certs/panel.crt",
 			KeyFile:    "/etc/hy2panel/certs/panel.key",
+		},
+		Telemetry: Telemetry{
+			Enabled: true,
+			Listen:  defaultTelemetryListen,
+			Secret:  telemetrySecret,
 		},
 		Reality: Reality{
 			Enabled:    true,
@@ -144,13 +170,57 @@ func Initial(panelDomain, hy2Domain, publicHost, adminIP, password string) (*Con
 func (c *Config) Public() Config {
 	copy := *c
 	copy.AdminPasswordHash = ""
+	copy.Panel.AdminCIDR = ""
+	copy.Telemetry.Secret = ""
 	copy.RackNerd.APIKey = ""
 	copy.RackNerd.APIHash = ""
 	return copy
 }
 
+func (c *Config) EnsureTelemetry() (bool, error) {
+	if c == nil {
+		return false, errors.New("配置不能为空")
+	}
+	changed := false
+	missing := c.Telemetry == (Telemetry{})
+	if c.Telemetry.Listen == "" {
+		c.Telemetry.Listen = defaultTelemetryListen
+		changed = true
+	}
+	if missing {
+		c.Telemetry.Enabled = true
+		changed = true
+	}
+	if c.Telemetry.Secret == "" {
+		secret, err := randomToken(32)
+		if err != nil {
+			return false, err
+		}
+		c.Telemetry.Secret = secret
+		changed = true
+	}
+	return changed, nil
+}
+
+func (c *Config) Migrate() (bool, error) {
+	if c == nil {
+		return false, errors.New("配置不能为空")
+	}
+	if c.Version != SchemaVersion {
+		return false, errors.New("不支持的配置版本")
+	}
+	changed, err := c.EnsureTelemetry()
+	if err != nil {
+		return false, err
+	}
+	if err := c.Validate(); err != nil {
+		return false, err
+	}
+	return changed, nil
+}
+
 func (c *Config) Validate() error {
-	if c.Version != 1 {
+	if c.Version != SchemaVersion {
 		return errors.New("不支持的配置版本")
 	}
 	if !strings.HasPrefix(c.AdminPasswordHash, "$2") {
@@ -162,19 +232,29 @@ func (c *Config) Validate() error {
 	if err := validateHost(c.Panel.PublicHost, true); err != nil {
 		return fmt.Errorf("节点地址无效: %w", err)
 	}
-	if _, err := parsePrefix(c.Panel.AdminCIDR); err != nil {
-		return err
+	if c.Panel.AdminCIDR != "" {
+		if _, err := parsePrefix(c.Panel.AdminCIDR); err != nil {
+			return err
+		}
 	}
-	host, port, err := net.SplitHostPort(c.Panel.Listen)
-	if err != nil || (host != "" && host != "127.0.0.1" && host != "::1") {
+	panelHost, panelPort, err := splitListen(c.Panel.Listen)
+	if err != nil || (panelHost.IsValid() && !panelHost.IsLoopback()) {
 		return errors.New("面板监听地址无效")
-	}
-	panelPort, err := strconv.Atoi(port)
-	if err != nil || !validPort(panelPort) {
-		return errors.New("面板端口无效")
 	}
 	if err := validateCertPaths(c.Panel.CertFile, c.Panel.KeyFile); err != nil {
 		return err
+	}
+	if c.Telemetry != (Telemetry{}) {
+		telemetryHost, telemetryPort, err := splitListen(c.Telemetry.Listen)
+		if err != nil || !telemetryHost.IsValid() || !telemetryHost.IsLoopback() {
+			return errors.New("Telemetry 监听地址必须是 loopback 地址")
+		}
+		if telemetryPort == panelPort || (c.Reality.Enabled && telemetryPort == c.Reality.Port) || (c.Hysteria2.Enabled && telemetryPort == c.Hysteria2.Port) {
+			return errors.New("Telemetry 端口与其他服务冲突")
+		}
+		if err := validateSecret(c.Telemetry.Secret); err != nil {
+			return fmt.Errorf("Telemetry secret 无效: %w", err)
+		}
 	}
 	if c.Reality.Enabled {
 		if !validPort(c.Reality.Port) || c.Reality.Port == panelPort {
@@ -288,6 +368,14 @@ func (c *Config) SingBoxJSON() ([]byte, error) {
 		"inbounds":  inbounds,
 		"outbounds": []map[string]any{{"type": "direct", "tag": "direct"}},
 	}
+	if c.Telemetry.Enabled {
+		doc["experimental"] = map[string]any{
+			"clash_api": map[string]any{
+				"external_controller": c.Telemetry.Listen,
+				"secret":              c.Telemetry.Secret,
+			},
+		}
+	}
 	return json.MarshalIndent(doc, "", "  ")
 }
 
@@ -338,6 +426,33 @@ func parsePrefix(value string) (netip.Prefix, error) {
 		return netip.Prefix{}, errors.New("管理 IP 或 CIDR 无效")
 	}
 	return netip.PrefixFrom(addr, addr.BitLen()), nil
+}
+
+func splitListen(value string) (netip.Addr, int, error) {
+	host, portText, err := net.SplitHostPort(value)
+	if err != nil {
+		return netip.Addr{}, 0, err
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || !validPort(port) {
+		return netip.Addr{}, 0, errors.New("监听端口无效")
+	}
+	if host == "" {
+		return netip.Addr{}, port, nil
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, 0, err
+	}
+	return addr.Unmap(), port, nil
+}
+
+func validateSecret(value string) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 || base64.RawURLEncoding.EncodeToString(decoded) != value {
+		return errors.New("secret 必须是 32 字节 RawURL Base64")
+	}
+	return nil
 }
 
 func validateHost(value string, allowIP bool) error {

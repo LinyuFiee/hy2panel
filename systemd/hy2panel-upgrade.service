@@ -1,7 +1,8 @@
 [Unit]
 Description=Download and apply a verified hy2panel update
 Wants=network-online.target
-After=network-online.target
+After=network-online.target hy2panel-recover.service
+Requires=hy2panel-recover.service
 
 [Service]
 Type=oneshot

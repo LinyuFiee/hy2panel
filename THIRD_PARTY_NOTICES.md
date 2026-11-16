@@ -1,5 +1,25 @@
 # Third-party notices
 
+## sing-box
+
+Project: https://github.com/SagerNet/sing-box
+
+Versions selected by the installer: the exact releases in
+`packaging/sing-box-versions.json`
+
+License: GNU General Public License v3.0 or later
+
+License text: https://github.com/SagerNet/sing-box/blob/master/LICENSE
+
+Copyright (C) 2022 by nekohasekai <contact-sagernet@sekai.icu>
+
+The upstream license also states that derived projects may not use the
+application's name or imply association without prior consent.
+
+The installer downloads an allowlisted official Linux binary and verifies its
+asset name, size, and SHA-256. The binary is not repackaged in hy2panel's
+Release bundle.
+
 ## Hairline
 
 Project: https://github.com/lucasmarkes/hairline

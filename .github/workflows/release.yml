@@ -1,59 +1,233 @@
-name: release
+name: Release
 
 on:
   push:
     tags:
-      - "v*"
+      - "v0.5.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v0.5.x tag to publish
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  test:
+    name: Reuse CI
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
   build-and-release:
+    name: Build and publish v0.5 bundle
+    needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      BUNDLE: hy2panel-bundle-linux-amd64.tar.gz
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Reject invalid tag input
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ ${RELEASE_TAG} =~ ^v0\.5\.[0-9]+$ ]]
+
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a published tag at HEAD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --force --no-tags origin "refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse 'FETCH_HEAD^{commit}')"
+          [[ ${tag_commit} == "$(git rev-parse HEAD)" ]]
+          [[ $(git status --short --untracked-files=all) == "" ]]
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.27.3
+          go-version-file: go.mod
           cache-dependency-path: go.sum
+
+      - name: Validate tag and source versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          TAG_VERSION="${RELEASE_TAG#v}"
+          PACKAGE_VERSION="$(node -p "require('./web/package.json').version")"
+          LOCK_VERSION="$(node -p "require('./web/package-lock.json').version")"
+          LOCK_ROOT_VERSION="$(node -p "require('./web/package-lock.json').packages[''].version")"
+          GO_VERSION="$(sed -nE 's/^[[:space:]]*var[[:space:]]+Version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' internal/version/version.go)"
+          [[ -n ${PACKAGE_VERSION} && -n ${LOCK_VERSION} && -n ${LOCK_ROOT_VERSION} && -n ${GO_VERSION} ]]
+          [[ ${TAG_VERSION} == "${PACKAGE_VERSION}" ]]
+          [[ ${TAG_VERSION} == "${LOCK_VERSION}" ]]
+          [[ ${TAG_VERSION} == "${LOCK_ROOT_VERSION}" ]]
+          [[ ${TAG_VERSION} == "${GO_VERSION}" ]]
+          printf 'release version %s\n' "${TAG_VERSION}"
+
       - name: Build frontend
         working-directory: web
         run: |
           npm ci
           npm run build
-      - name: Test UI
-        working-directory: web
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:ui
-      - name: Test backend
-        run: |
-          go test ./...
-          go vet ./...
-      - name: Check scripts
-        run: bash -n scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/hy2panel-upgrade.sh scripts/cert-deploy.sh scripts/bootstrap.sh
-      - name: Build Linux binary
+
+      - name: Build tagged Linux amd64 binary
         env:
           CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-        run: go build -trimpath -ldflags="-s -w" -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
-      - name: Package release
+        shell: bash
         run: |
-          mkdir -p release/bundle/dist release/bundle/scripts release/bundle/systemd
-          cp dist/hy2panel-linux-amd64 release/bundle/dist/
-          cp scripts/install.sh scripts/hy2panel-apply.sh scripts/hy2panel-bbr.sh scripts/hy2panel-watchdog.sh scripts/hy2panel-upgrade.sh scripts/cert-deploy.sh scripts/99-hy2panel.conf release/bundle/scripts/
-          cp systemd/hy2panel.service systemd/hy2panel-firewall.service systemd/hy2panel-apply.path systemd/hy2panel-apply.service systemd/hy2panel-bbr.path systemd/hy2panel-bbr.service systemd/hy2panel-watchdog.service systemd/hy2panel-watchdog.timer systemd/hy2panel-upgrade.path systemd/hy2panel-upgrade.service systemd/sing-box.service release/bundle/systemd/
-          tar -czf release/hy2panel-bundle-linux-amd64.tar.gz -C release/bundle .
-          cd release
-          sha256sum hy2panel-bundle-linux-amd64.tar.gz > hy2panel-bundle-linux-amd64.tar.gz.sha256
-      - name: Publish release
+          set -Eeuo pipefail
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags="-s -w -X hy2panel/internal/version.Version=${RELEASE_TAG#v}" \
+            -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
+          [[ $(./dist/hy2panel-linux-amd64 version) == "${RELEASE_TAG#v}" ]]
+
+      - name: Package complete bundle
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p release/bundle/dist release/bundle/scripts/lib release/bundle/systemd release/bundle/packaging
+          install -m 0755 dist/hy2panel-linux-amd64 release/bundle/dist/hy2panel-linux-amd64
+
+          scripts=(
+            scripts/hy2
+            scripts/install.sh
+            scripts/hy2panel-apply.sh
+            scripts/hy2panel-backup.sh
+            scripts/hy2panel-bbr.sh
+            scripts/hy2panel-recover.sh
+            scripts/hy2panel-restore.sh
+            scripts/hy2panel-sing-box.sh
+            scripts/hy2panel-uninstall.sh
+            scripts/hy2panel-upgrade.sh
+            scripts/hy2panel-watchdog.sh
+            scripts/cert-deploy.sh
+          )
+          for script in "${scripts[@]}"; do
+            install -m 0755 "${script}" "release/bundle/scripts/$(basename "${script}")"
+          done
+          install -m 0644 scripts/99-hy2panel.conf release/bundle/scripts/99-hy2panel.conf
+          install -m 0644 scripts/lib/hy2panel-transaction.sh release/bundle/scripts/lib/hy2panel-transaction.sh
+          install -m 0644 packaging/sing-box-versions.json release/bundle/packaging/sing-box-versions.json
+
+          units=(
+            systemd/hy2panel.service
+            systemd/sing-box.service
+            systemd/hy2panel-apply.path
+            systemd/hy2panel-apply.service
+            systemd/hy2panel-bbr.path
+            systemd/hy2panel-bbr.service
+            systemd/hy2panel-recover.service
+            systemd/hy2panel-sing-box.path
+            systemd/hy2panel-sing-box.service
+            systemd/hy2panel-upgrade.path
+            systemd/hy2panel-upgrade.service
+            systemd/hy2panel-watchdog.service
+            systemd/hy2panel-watchdog.timer
+          )
+          for unit in "${units[@]}"; do
+            install -m 0644 "${unit}" "release/bundle/systemd/$(basename "${unit}")"
+          done
+
+          [[ ! -e release/bundle/systemd/hy2panel-firewall.service ]]
+          tar --sort=name --mtime="UTC 1970-01-01" --owner=0 --group=0 --numeric-owner \
+            -czf "release/${BUNDLE}" -C release/bundle .
+          (
+            cd release
+            sha256sum "${BUNDLE}" > "${BUNDLE}.sha256"
+            sha256sum --check "${BUNDLE}.sha256"
+          )
+
+      - name: Validate published bundle contents
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          actual="$(mktemp)"
+          expected="$(mktemp)"
+          trap 'rm -f "${actual}" "${expected}"' EXIT
+          tar -tzf "release/${BUNDLE}" | sed -E 's#^\./##' | sed '/^$/d; /\/$/d' | sort > "${actual}"
+          cat > "${expected}" <<'EOF'
+          dist/hy2panel-linux-amd64
+          packaging/sing-box-versions.json
+          scripts/99-hy2panel.conf
+          scripts/cert-deploy.sh
+          scripts/hy2
+          scripts/hy2panel-apply.sh
+          scripts/hy2panel-backup.sh
+          scripts/hy2panel-bbr.sh
+          scripts/hy2panel-recover.sh
+          scripts/hy2panel-restore.sh
+          scripts/hy2panel-sing-box.sh
+          scripts/hy2panel-uninstall.sh
+          scripts/hy2panel-upgrade.sh
+          scripts/hy2panel-watchdog.sh
+          scripts/install.sh
+          scripts/lib/hy2panel-transaction.sh
+          systemd/hy2panel-apply.path
+          systemd/hy2panel-apply.service
+          systemd/hy2panel-bbr.path
+          systemd/hy2panel-bbr.service
+          systemd/hy2panel-recover.service
+          systemd/hy2panel-sing-box.path
+          systemd/hy2panel-sing-box.service
+          systemd/hy2panel-upgrade.path
+          systemd/hy2panel-upgrade.service
+          systemd/hy2panel-watchdog.service
+          systemd/hy2panel-watchdog.timer
+          systemd/hy2panel.service
+          systemd/sing-box.service
+          EOF
+          sort -o "${expected}" "${expected}"
+          diff -u "${expected}" "${actual}"
+          ! grep -q 'firewall' "${actual}"
+
+      - name: Copy standalone v0.4 migration helper
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -m 0755 scripts/migrate-v04-to-v05.sh release/migrate-v04-to-v05.sh
+          sed -i "s/^TARGET_VERSION=.*/TARGET_VERSION=${RELEASE_TAG}/" release/migrate-v04-to-v05.sh
+          grep -q "^TARGET_VERSION=${RELEASE_TAG}$" release/migrate-v04-to-v05.sh
+
+      - name: Attest release artifacts
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            release/hy2panel-bundle-linux-amd64.tar.gz
+            release/migrate-v04-to-v05.sh
+
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" release/hy2panel-bundle-linux-amd64.tar.gz release/hy2panel-bundle-linux-amd64.tar.gz.sha256 --title "${GITHUB_REF_NAME}" --generate-notes
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          gh release create "${RELEASE_TAG}" \
+            "release/${BUNDLE}" \
+            "release/${BUNDLE}.sha256" \
+            "release/migrate-v04-to-v05.sh" \
+            --verify-tag \
+            --title "${RELEASE_TAG}" \
+            --generate-notes

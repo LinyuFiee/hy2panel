@@ -1,0 +1,14 @@
+[Unit]
+Description=Switch or roll back the verified sing-box core
+Wants=network-online.target
+After=network-online.target hy2panel-recover.service
+Requires=hy2panel-recover.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/hy2panel-sing-box
+TimeoutStartSec=600s
+PrivateTmp=true
+ProtectHome=true

@@ -1,6 +1,7 @@
 [Unit]
 Description=Validate and apply sing-box configuration
-After=sing-box.service
+After=sing-box.service hy2panel-recover.service
+Requires=hy2panel-recover.service
 
 [Service]
 Type=oneshot

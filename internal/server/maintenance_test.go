@@ -11,9 +11,9 @@ func TestRedactSecrets(t *testing.T) {
 	_, _, _, _, cfg := newTestServer(t)
 	cfg.RackNerd.APIKey = "racknerd-secret"
 	cfg.RackNerd.APIHash = "racknerd-hash"
-	input := strings.Join([]string{cfg.AdminPasswordHash, cfg.Reality.UUID, cfg.Reality.PrivateKey, cfg.Reality.PublicKey, cfg.Reality.ShortID, cfg.Hysteria2.Password, cfg.RackNerd.APIKey, cfg.RackNerd.APIHash}, " ")
+	input := strings.Join([]string{cfg.AdminPasswordHash, cfg.Telemetry.Secret, cfg.Reality.UUID, cfg.Reality.PrivateKey, cfg.Reality.PublicKey, cfg.Reality.ShortID, cfg.Hysteria2.Password, cfg.RackNerd.APIKey, cfg.RackNerd.APIHash}, " ")
 	output := redactSecrets(input, cfg)
-	for _, secret := range []string{cfg.AdminPasswordHash, cfg.Reality.UUID, cfg.Reality.PrivateKey, cfg.Reality.PublicKey, cfg.Reality.ShortID, cfg.Hysteria2.Password, cfg.RackNerd.APIKey, cfg.RackNerd.APIHash} {
+	for _, secret := range []string{cfg.AdminPasswordHash, cfg.Telemetry.Secret, cfg.Reality.UUID, cfg.Reality.PrivateKey, cfg.Reality.PublicKey, cfg.Reality.ShortID, cfg.Hysteria2.Password, cfg.RackNerd.APIKey, cfg.RackNerd.APIHash} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("secret was not redacted: %s", secret)
 		}

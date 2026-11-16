@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for sing-box core version requests
+
+[Path]
+PathExists=/etc/hy2panel/sing-box-update.request
+Unit=hy2panel-sing-box.service
+
+[Install]
+WantedBy=multi-user.target

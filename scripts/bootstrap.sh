@@ -88,10 +88,6 @@ if [[ -z ${DEFAULT_PUBLIC_HOST} ]]; then
   DEFAULT_PUBLIC_HOST="$(hostname -I)"
   DEFAULT_PUBLIC_HOST="${DEFAULT_PUBLIC_HOST%% *}"
 fi
-DEFAULT_ADMIN_IP="${ADMIN_IP:-}"
-if [[ -z ${DEFAULT_ADMIN_IP} && -n ${SSH_CLIENT:-} ]]; then
-  DEFAULT_ADMIN_IP="${SSH_CLIENT%% *}"
-fi
 
 if [[ ${INTERACTIVE} -eq 1 ]]; then
   printf '\n\033[1;32mhy2panel 交互式安装\033[0m\n'
@@ -101,7 +97,6 @@ fi
 ask_value PANEL_DOMAIN '面板域名，例如 panel.example.com'
 ask_value HY2_DOMAIN 'Hysteria2 证书域名，例如 hy2.example.com'
 ask_value PUBLIC_HOST 'Reality 公网地址' "${DEFAULT_PUBLIC_HOST}"
-ask_value ADMIN_IP '允许访问面板的公网 IP 或 CIDR' "${DEFAULT_ADMIN_IP}"
 ask_optional ACME_EMAIL '证书通知邮箱（可留空）'
 ask_secret RACKNERD_API_KEY 'RackNerd API Key（可留空）'
 ask_secret RACKNERD_API_HASH 'RackNerd API Hash（可留空）'
@@ -114,10 +109,10 @@ if [[ -n ${RACKNERD_API_KEY:-} && -z ${RACKNERD_API_HASH:-} || -z ${RACKNERD_API
   exit 1
 fi
 
-export PANEL_DOMAIN HY2_DOMAIN PUBLIC_HOST ADMIN_IP ACME_EMAIL RACKNERD_API_KEY RACKNERD_API_HASH
+export PANEL_DOMAIN HY2_DOMAIN PUBLIC_HOST ACME_EMAIL RACKNERD_API_KEY RACKNERD_API_HASH
 
 if [[ ${PROMPTED} -eq 1 ]]; then
-  printf '\n安装摘要\n面板: https://%s:8443\nReality: %s\nHysteria2: %s\n管理白名单: %s\n' "${PANEL_DOMAIN}" "${PUBLIC_HOST}" "${HY2_DOMAIN}" "${ADMIN_IP}"
+  printf '\n安装摘要\n面板: https://%s:8443\nReality: %s\nHysteria2: %s\n访问方式: 公网 HTTPS + 管理员密码\n' "${PANEL_DOMAIN}" "${PUBLIC_HOST}" "${HY2_DOMAIN}"
   read -r -p '确认开始安装？[Y/n] ' CONFIRM < /dev/tty
   if [[ ${CONFIRM:-Y} =~ ^[Nn]$ ]]; then
     printf '已取消安装。\n'
@@ -143,12 +138,19 @@ fi
 
 BASE_URL="https://github.com/${REPOSITORY}/releases/${RELEASE_PATH}"
 BUNDLE=hy2panel-bundle-linux-amd64.tar.gz
-curl -fL --connect-timeout 20 --max-time 300 "${BASE_URL}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
-curl -fL --connect-timeout 20 --max-time 60 "${BASE_URL}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
+curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${BASE_URL}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
+curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${BASE_URL}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
+[[ $(wc -l < "${WORK_DIR}/${BUNDLE}.sha256") -eq 1 ]]
+grep -Eq "^[0-9a-f]{64}  ${BUNDLE}$" "${WORK_DIR}/${BUNDLE}.sha256"
 (
   cd "${WORK_DIR}"
   sha256sum -c "${BUNDLE}.sha256"
 )
 mkdir "${WORK_DIR}/bundle"
-tar -xzf "${WORK_DIR}/${BUNDLE}" -C "${WORK_DIR}/bundle"
+while IFS= read -r member; do
+  member="${member#./}"
+  [[ -z ${member} ]] && continue
+  [[ ${member} != /* && ${member} != ".." && ${member} != ../* && ${member} != */../* && ${member} != */.. ]]
+done < <(tar -tzf "${WORK_DIR}/${BUNDLE}")
+tar -xzf "${WORK_DIR}/${BUNDLE}" -C "${WORK_DIR}/bundle" --no-same-owner --no-same-permissions
 bash "${WORK_DIR}/bundle/scripts/install.sh"
