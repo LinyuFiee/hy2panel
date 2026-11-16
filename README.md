@@ -55,7 +55,7 @@ v0.5 不再询问 `ADMIN_IP`，也不会创建面板 IP 白名单。确认摘要
 /root/hy2panel-credentials
 ```
 
-访问地址为 `https://面板域名:8443`。首次登录后建议立即执行 `hy2 passwd` 设置独立强密码。
+首次登录后建议立即执行 `hy2 passwd` 设置独立强密码。非 root 用户执行需要系统权限的 `hy2` 操作时，交互终端会询问是否通过 `sudo` 获取 root；拒绝或系统未安装 sudo 时，不执行该维护操作。
 
 ### 无人值守安装
 
@@ -73,7 +73,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新稳定 Release。固定面板版本时，bootstrap 只接受完整标签：
 
 ```bash
-export HY2PANEL_VERSION="v0.5.0"
+export HY2PANEL_VERSION="v0.5.1"
 ```
 
 可选的 `SING_BOX_VERSION` 必须是 bundle 中 `packaging/sing-box-versions.json` allowlist 的**精确版本**；任意版本、部分版本和未知版本都会被拒绝：
@@ -193,7 +193,7 @@ v0.5 的 bundle 与维护脚本新增事务库、`hy2`、备份/恢复/卸载、
 在服务器上先备份 `/etc/hy2panel`、`/root/hy2panel-credentials` 和证书，最好再创建 VPS 快照。然后从目标 v0.5.x Release 下载 bundle 内的自包含迁移器并执行：
 
 ```bash
-curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.5.0/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
+curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.5.1/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
 bash /tmp/migrate-v04-to-v05.sh
 ```
 

@@ -2,7 +2,20 @@
 set -Eeuo pipefail
 
 if [[ ${EUID} -ne 0 ]]; then
-  printf '请使用 root 运行。\n' >&2
+  if [[ ${HY2PANEL_NONINTERACTIVE:-0} == 1 ]]; then
+    if command -v sudo >/dev/null 2>&1; then
+      exec sudo -E bash "$0" "$@"
+    fi
+    printf '非交互安装需要 root，且系统未提供 sudo。\n' >&2
+    exit 1
+  fi
+  if [[ -r /dev/tty && -w /dev/tty ]] && command -v sudo >/dev/null 2>&1; then
+    read -r -p '安装需要 root 权限，是否使用 sudo 获取？[Y/n] ' allow_root < /dev/tty
+    if [[ ! ${allow_root:-Y} =~ ^[Nn]$ ]]; then
+      exec sudo -E bash "$0" "$@"
+    fi
+  fi
+  printf '未获得 root 权限，安装已取消；普通只读命令仍可在安装完成后使用。\n' >&2
   exit 1
 fi
 

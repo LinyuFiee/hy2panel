@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_ARGS=("$@")
+
 require_root() {
-  if [[ ${EUID} -ne 0 ]]; then
-    printf '该操作需要 root 权限。\n' >&2
-    exit 1
+  if [[ ${EUID} -eq 0 ]]; then
+    return
   fi
+  if [[ -t 0 && -t 1 && -r /dev/tty && -w /dev/tty ]] && command -v sudo >/dev/null 2>&1; then
+    read -r -p '该操作需要 root 权限，是否使用 sudo 获取？[Y/n] ' allow_root < /dev/tty
+    if [[ ! ${allow_root:-Y} =~ ^[Nn]$ ]]; then
+      exec sudo -E /usr/local/bin/hy2 "${SCRIPT_ARGS[@]}"
+    fi
+  fi
+  printf '未获得 root 权限，无法执行该维护操作。\n' >&2
+  exit 1
 }
 
 usage() {
