@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
+import { fileURLToPath, URL } from 'node:url'
 
 const mockState = {
   config: {
@@ -28,7 +30,7 @@ const mockState = {
     result: { timestamp: '2026-11-07T10:00:00Z', server_name: 'San Jose · LibreSpeed', ping: 18.6, jitter: 1.4, download_mbps: 683, upload_mbps: 412, bytes_sent: 200000000, bytes_received: 600000000 }
   },
   node_meta: { country_code: 'US', country_name: 'United States', flag: '🇺🇸', reality_name: '🇺🇸 US-Reality', hysteria2_name: '🇺🇸 US-Hysteria2' },
-  update: { current_version: '0.4.0', latest_version: '0.4.0', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
+  update: { current_version: '0.6.0', latest_version: '0.6.0', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
 }
 
 const mockTraffic = {
@@ -62,6 +64,15 @@ const singBoxVersions = {
     { version: '1.14.2', tag: 'v1.14.2', status: 'supported', asset_name: 'sing-box-1.14.2-linux-amd64.tar.gz', size: 31457280, sha256: '899a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24960', release_url: 'https://github.com/SagerNet/sing-box/releases/tag/v1.14.2' }
   ],
   operation: {}
+}
+
+const initialMockState = JSON.stringify(mockState)
+const initialMockTraffic = JSON.stringify(mockTraffic)
+const initialSingBoxVersions = JSON.stringify(singBoxVersions)
+
+function replaceObject(target, source) {
+  for (const key of Object.keys(target)) delete target[key]
+  Object.assign(target, JSON.parse(source))
 }
 
 let mockTick = 0
@@ -140,6 +151,7 @@ function beginCoreOperation(action, targetVersion = '') {
 export default defineConfig({
   plugins: [
     vue(),
+    tailwindcss(),
     {
       name: 'mock-ui',
       configureServer(server) {
@@ -148,6 +160,16 @@ export default defineConfig({
           if (!req.url?.startsWith('/api/')) return next()
           res.setHeader('Content-Type', 'application/json; charset=utf-8')
           if (req.url === '/api/login') {
+            res.end('{"status":"ok"}')
+            return
+          }
+          if (req.url === '/api/test/reset') {
+            clearTimeout(operationPhaseTimer)
+            clearTimeout(operationCompleteTimer)
+            mockTick = 0
+            replaceObject(mockState, initialMockState)
+            replaceObject(mockTraffic, initialMockTraffic)
+            replaceObject(singBoxVersions, initialSingBoxVersions)
             res.end('{"status":"ok"}')
             return
           }
@@ -233,12 +255,16 @@ export default defineConfig({
             return
           }
           if (req.url === '/api/settings/recovery') {
-            mockState.config.recovery.auto_port = true
-            res.end(JSON.stringify(mockState))
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', () => {
+              try { mockState.config.recovery.auto_port = Boolean(JSON.parse(body).auto_port) } catch {}
+              res.end(JSON.stringify(mockState))
+            })
             return
           }
           if (req.url === '/api/update/check') {
-            mockState.update.latest_version = '0.5.0'
+            mockState.update.latest_version = '0.6.0'
             mockState.update.available = true
             res.end(JSON.stringify(mockState.update))
             return
@@ -250,7 +276,7 @@ export default defineConfig({
             setTimeout(() => {
               mockState.update.updating = false
               mockState.update.available = false
-              mockState.update.current_version = '0.5.0'
+              mockState.update.current_version = '0.6.0'
               mockState.update.message = '更新完成，请刷新页面'
             }, 2000)
             return
@@ -271,6 +297,11 @@ export default defineConfig({
       }
     }
   ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true

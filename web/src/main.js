@@ -1,5 +1,14 @@
-import { createApp } from 'vue'
+import { createApp, h } from 'vue'
 import App from './App.vue'
-import './style.css'
+import { Toaster } from '@/components/ui/sonner'
+import './styles/globals.css'
+import 'vue-sonner/style.css'
+import './styles/theme'
 
-createApp(App).mount('#app')
+const Root = {
+  render() {
+    return [h(App), h(Toaster)]
+  }
+}
+
+createApp(Root).mount('#app')

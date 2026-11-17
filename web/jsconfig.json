@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "allowJs": true,
+    "checkJs": false,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true
+  },
+  "exclude": ["node_modules", "dist"]
+}
