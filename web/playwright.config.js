@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
+  snapshotDir: './tests/__screenshots__',
   fullyParallel: false,
   workers: 1,
   timeout: 30000,

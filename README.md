@@ -8,7 +8,9 @@
 
 ## 功能
 
-- VLESS Reality Vision 与 Hysteria2 配置、客户端链接和本地二维码
+- 基于 shadcn-vue / Reka UI 的五区控制台、亮色/暗色/跟随系统主题与移动 Sheet 导航
+- Hairline 风格的 6U 服务器机架、配线端口和数据传输路径互动视觉
+- VLESS Reality Vision 与 Hysteria2 配置、按需显示的客户端链接和本地二维码
 - Reality / Hysteria2 实时速率、累计有效载荷、活动代理流与最多 7 天分钟趋势
 - 无法安全归类的代理流量单列为「未归属」
 - 主机上下行、CPU、内存、磁盘和运行时间
@@ -73,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新稳定 Release。固定面板版本时，bootstrap 只接受完整标签：
 
 ```bash
-export HY2PANEL_VERSION="v0.5.1"
+export HY2PANEL_VERSION="v0.6.0"
 ```
 
 可选的 `SING_BOX_VERSION` 必须是 bundle 中 `packaging/sing-box-versions.json` allowlist 的**精确版本**；任意版本、部分版本和未知版本都会被拒绝：
@@ -83,6 +85,8 @@ export SING_BOX_VERSION="1.14.4"
 ```
 
 allowlist 同时固定官方资产名称、字节数和 SHA-256。未指定时安装清单中唯一标为 `recommended` 的版本。
+
+v0.6 的控制台采用 shadcn-vue / Reka UI 设计原语、Tailwind CSS v4 语义主题和项目内 Hairline 风格服务器机架 SVG。它支持亮色、暗色与跟随系统三种模式；主题偏好只保存在当前浏览器，不会发送到服务器。
 
 ## 协议流量口径
 
@@ -193,7 +197,7 @@ v0.5 的 bundle 与维护脚本新增事务库、`hy2`、备份/恢复/卸载、
 在服务器上先备份 `/etc/hy2panel`、`/root/hy2panel-credentials` 和证书，最好再创建 VPS 快照。然后从目标 v0.5.x Release 下载 bundle 内的自包含迁移器并执行：
 
 ```bash
-curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.5.1/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
+curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.6.0/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
 bash /tmp/migrate-v04-to-v05.sh
 ```
 

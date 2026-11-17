@@ -48,6 +48,57 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## shadcn-vue generated component sources
+
+Project: https://github.com/unovue/shadcn-vue
+
+License: MIT
+
+The frontend includes project-owned component source generated from and adapted
+from shadcn-vue. The source remains vendored in this repository rather than
+loaded from a CDN.
+
+## Reka UI
+
+Project: https://github.com/unovue/reka-ui
+
+Package: `reka-ui`
+
+License: MIT
+
+## Tailwind CSS
+
+Project: https://github.com/tailwindlabs/tailwindcss
+
+Packages: `tailwindcss`, `@tailwindcss/vite`
+
+License: MIT
+
+## VueUse
+
+Project: https://github.com/vueuse/vueuse
+
+Package: `@vueuse/core`
+
+License: MIT
+
+## Vue Sonner
+
+Project: https://github.com/xiaoluoboding/vue-sonner
+
+Package: `vue-sonner`
+
+License: MIT
+
+## Class utilities
+
+Projects: https://github.com/joe-bell/cva, https://github.com/lukeed/clsx,
+https://github.com/dcastil/tailwind-merge
+
+Packages: `class-variance-authority`, `clsx`, `tailwind-merge`
+
+Licenses: Apache-2.0 (CVA), MIT (clsx and tailwind-merge)
+
 ## LibreSpeed CLI
 
 Project: https://github.com/librespeed/speedtest-cli

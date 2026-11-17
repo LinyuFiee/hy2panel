@@ -6,7 +6,7 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
-TARGET_VERSION=v0.5.1
+TARGET_VERSION=v0.6.0
 REPOSITORY=${HY2PANEL_REPOSITORY:-LinyuFiee/hy2panel}
 [[ ${TARGET_VERSION} =~ ^v0\.5\.[0-9]+$ ]] || { printf '迁移器目标版本无效。\n' >&2; exit 1; }
 [[ -f /etc/hy2panel/panel.json ]] || { printf '未检测到现有 hy2panel 配置。\n' >&2; exit 1; }
