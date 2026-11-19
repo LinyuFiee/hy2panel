@@ -4,5 +4,5 @@ const props = defineProps({ class: { type: [String, Array, Object], default: und
 </script>
 
 <template>
-  <p data-slot="card-description" :class="cn('text-sm text-muted-foreground', props.class)"><slot /></p>
+  <p data-slot="card-description" :class="cn('m-0 text-xs leading-relaxed text-muted-foreground', props.class)"><slot /></p>
 </template>

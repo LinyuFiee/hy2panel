@@ -10,7 +10,6 @@ import {
   GitBranch,
   Info,
   LoaderCircle,
-  Network,
   Play,
   Settings2,
   Zap
@@ -20,16 +19,7 @@ import ProtocolTrafficChart from './ProtocolTrafficChart.vue'
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Badge } from './ui/badge'
 import { Button } from './ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle
-} from './ui/card'
 import { Progress } from './ui/progress'
-import { Separator } from './ui/separator'
 import { formatBytes, formatCount, formatMbps, formatRate, formatTimestamp, sumBytes } from '../utils'
 
 const props = defineProps({
@@ -45,8 +35,8 @@ const props = defineProps({
 const emit = defineEmits(['speedtest', 'settings', 'history-range'])
 
 const protocolDefinitions = [
-  { key: 'reality', name: 'Reality', transport: 'TCP · VLESS', tone: 'reality' },
-  { key: 'hysteria2', name: 'Hysteria2', transport: 'UDP · QUIC', tone: 'hysteria2' }
+  { key: 'reality', name: 'Reality', transport: 'TCP · VLESS' },
+  { key: 'hysteria2', name: 'Hysteria2', transport: 'UDP · QUIC' }
 ]
 const observedProtocols = ['reality', 'hysteria2', 'unattributed']
 
@@ -117,20 +107,19 @@ const speedButtonLabel = computed(() => {
 </script>
 
 <template>
-  <div class="traffic-workspace">
-    <section class="protocol-live-section" aria-labelledby="protocol-live-heading">
-      <div class="section-intro">
-        <div>
-          <span class="workspace-kicker"><Activity :size="14" /> LIVE PROTOCOLS</span>
-          <h2 id="protocol-live-heading">协议实时</h2>
-          <p>分开观察 Reality 与 Hysteria2 的当前速率、活动连接和累计代理载荷。</p>
-        </div>
-        <div class="sample-state">
-          <Badge :variant="trafficState.variant" class="sample-badge">
-            <span class="sample-dot" :class="trafficState.state" aria-hidden="true"></span>
+  <div class="traffic">
+    <section class="live-section" aria-labelledby="protocol-live-heading">
+      <div class="topline">
+        <h2 id="protocol-live-heading">协议实时</h2>
+        <div class="topline-right" aria-live="polite" aria-atomic="true">
+          <Badge :variant="trafficState.variant" class="live-badge">
+            <span class="dot" :class="trafficState.state" aria-hidden="true"></span>
             {{ trafficState.label }}
           </Badge>
-          <span>{{ traffic?.sampled_at ? `采样 ${formatTimestamp(traffic.sampled_at)}` : '等待首次采样' }}</span>
+          <time v-if="traffic?.sampled_at" class="sampled tnum" :datetime="traffic.sampled_at">
+            采样 {{ formatTimestamp(traffic.sampled_at) }}
+          </time>
+          <span v-else class="sampled tnum">等待首次采样</span>
         </div>
       </div>
 
@@ -140,253 +129,204 @@ const speedButtonLabel = computed(() => {
         <AlertDescription>{{ trafficNotice }}</AlertDescription>
       </Alert>
 
-      <div class="telemetry-grid" aria-label="协议流量关键指标">
-        <Card class="traffic-card telemetry-card">
-          <div class="telemetry-icon"><Activity :size="17" /></div>
-          <span>当前代理速率</span>
-          <strong>{{ formatRate(sumBytes(liveDownloadTotal, liveUploadTotal)) }}</strong>
-          <div class="telemetry-pair">
-            <span><ArrowDownToLine :size="12" />{{ formatRate(liveDownloadTotal) }}</span>
-            <span><ArrowUpFromLine :size="12" />{{ formatRate(liveUploadTotal) }}</span>
+      <section class="stat-grid" aria-label="协议流量关键指标">
+        <article class="stat">
+          <div class="stat-head"><Activity :size="15" aria-hidden="true" /><span>当前代理速率</span></div>
+          <strong class="stat-value">{{ formatRate(sumBytes(liveDownloadTotal, liveUploadTotal)) }}</strong>
+          <div class="stat-pair" aria-label="当前代理上下行速率">
+            <span><ArrowDownToLine :size="12" aria-hidden="true" />{{ formatRate(liveDownloadTotal) }}</span>
+            <span><ArrowUpFromLine :size="12" aria-hidden="true" />{{ formatRate(liveUploadTotal) }}</span>
           </div>
-        </Card>
+        </article>
 
-        <Card class="traffic-card telemetry-card">
-          <div class="telemetry-icon"><GitBranch :size="17" /></div>
-          <span>活动代理流</span>
-          <strong>{{ formatCount(activeFlowTotal) }}</strong>
-          <div class="telemetry-pair">
+        <article class="stat">
+          <div class="stat-head"><GitBranch :size="15" aria-hidden="true" /><span>活动代理流</span></div>
+          <strong class="stat-value">{{ formatCount(activeFlowTotal) }}</strong>
+          <div class="stat-pair">
             <span>Reality {{ formatCount(traffic?.active_flows?.reality || 0) }}</span>
             <span>Hysteria2 {{ formatCount(traffic?.active_flows?.hysteria2 || 0) }}</span>
           </div>
-        </Card>
+        </article>
 
-        <Card class="traffic-card telemetry-card">
-          <div class="telemetry-icon"><Database :size="17" /></div>
-          <span>代理观察累计</span>
-          <strong>{{ formatBytes(observedTotal) }}</strong>
-          <div class="telemetry-pair">
+        <article class="stat">
+          <div class="stat-head"><Database :size="15" aria-hidden="true" /><span>代理观察累计</span></div>
+          <strong class="stat-value">{{ formatBytes(observedTotal) }}</strong>
+          <div class="stat-pair">
             <span>下行 {{ formatBytes(observedDirection('download')) }}</span>
             <span>上行 {{ formatBytes(observedDirection('upload')) }}</span>
           </div>
-        </Card>
+        </article>
 
-        <Card class="traffic-card telemetry-card coverage-summary">
-          <div class="telemetry-icon"><Gauge :size="17" /></div>
-          <span>协议归属覆盖率</span>
-          <strong>{{ coveragePercent.toFixed(1) }}%</strong>
-          <div class="telemetry-pair">
+        <article class="stat">
+          <div class="stat-head"><Gauge :size="15" aria-hidden="true" /><span>归属覆盖率</span></div>
+          <strong class="stat-value">{{ coveragePercent.toFixed(1) }}%</strong>
+          <div class="stat-pair">
             <span>未归属 {{ unattributedPercent.toFixed(1) }}%</span>
             <span>{{ formatCount(traffic?.active_flows?.unattributed || 0) }} 条活动流</span>
           </div>
-        </Card>
-      </div>
+        </article>
+      </section>
 
-      <div class="protocol-surface-grid">
-        <Card
-          v-for="protocol in protocolDefinitions"
-          :key="protocol.key"
-          class="traffic-card live-protocol-surface"
-          :class="protocol.tone"
-          :data-testid="`${protocol.key}-traffic-card`"
-        >
-          <CardHeader class="protocol-surface-header">
-            <div class="protocol-identity">
-              <span class="protocol-mark"><GitBranch :size="19" /></span>
-              <div>
-                <span>{{ protocol.transport }}</span>
-                <CardTitle>{{ protocol.name }}</CardTitle>
-              </div>
-            </div>
-            <Badge variant="outline" class="flow-badge">
-              <Activity :size="12" />
-              {{ formatCount(traffic?.active_flows?.[protocol.key] || 0) }} 活动流
-            </Badge>
-          </CardHeader>
-
-          <CardContent class="protocol-surface-content">
-            <div class="protocol-rate-grid">
-              <div>
-                <span><ArrowDownToLine :size="14" />实时下行</span>
-                <strong>{{ formatRate(protocolRates(protocol.key).download) }}</strong>
-              </div>
-              <div>
-                <span><ArrowUpFromLine :size="14" />实时上行</span>
-                <strong>{{ formatRate(protocolRates(protocol.key).upload) }}</strong>
-              </div>
-            </div>
-            <Separator />
-            <div class="protocol-cumulative">
-              <div>
-                <span>累计代理载荷</span>
-                <strong>{{ formatBytes(protocolTotal(protocol.key)) }}</strong>
-              </div>
-              <dl>
-                <div><dt>下行</dt><dd>{{ formatBytes(protocolTraffic(protocol.key).download) }}</dd></div>
-                <div><dt>上行</dt><dd>{{ formatBytes(protocolTraffic(protocol.key).upload) }}</dd></div>
-                <div><dt>当前合计</dt><dd>{{ formatRate(protocolRateTotal(protocol.key)) }}</dd></div>
-              </dl>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card class="traffic-card attribution-surface" data-testid="unattributed-traffic">
-        <CardHeader class="attribution-header">
-          <div>
-            <span class="workspace-kicker">ATTRIBUTION SAFETY</span>
-            <CardTitle>未归属流量</CardTitle>
-            <CardDescription>不能安全映射到指定入站的代理流量会独立保留，不会回填到 Reality 或 Hysteria2。</CardDescription>
+      <section class="proto-grid" aria-label="Reality 与 Hysteria2 协议流量">
+      <article
+        v-for="protocol in protocolDefinitions"
+        :key="protocol.key"
+        class="card"
+        :class="protocol.key"
+        :data-testid="`${protocol.key}-traffic-card`"
+      >
+        <header class="card-head">
+          <div class="card-title">
+            <h3>{{ protocol.name }}</h3>
+            <small>{{ protocol.transport }}</small>
           </div>
-          <Badge variant="secondary">{{ unattributedPercent.toFixed(1) }}% 未归属</Badge>
-        </CardHeader>
-        <CardContent class="attribution-content">
-          <div class="coverage-readout">
+          <Badge variant="outline" class="flow-badge">
+            <Activity :size="12" aria-hidden="true" />
+            {{ formatCount(traffic?.active_flows?.[protocol.key] || 0) }} 活动流
+          </Badge>
+        </header>
+        <div class="card-body">
+          <div class="rate-grid">
             <div>
-              <span>协议归属覆盖率</span>
-              <strong>{{ coveragePercent.toFixed(1) }}%</strong>
+              <span><ArrowDownToLine :size="13" aria-hidden="true" />实时下行</span>
+              <strong>{{ formatRate(protocolRates(protocol.key).download) }}</strong>
             </div>
-            <Progress
-              :model-value="coveragePercent"
-              :max="100"
-              class="coverage-progress"
-              aria-label="协议归属覆盖率"
-            />
-            <small>只统计能够明确归类的代理载荷；未归属部分始终单列。</small>
+            <div>
+              <span><ArrowUpFromLine :size="13" aria-hidden="true" />实时上行</span>
+              <strong>{{ formatRate(protocolRates(protocol.key).upload) }}</strong>
+            </div>
           </div>
-          <dl class="unattributed-metrics">
-            <div>
-              <dt>累计</dt>
-              <dd>{{ formatBytes(protocolTotal('unattributed')) }}</dd>
+          <div class="cumulative">
+            <div class="cumulative-main">
+              <span>累计代理载荷</span>
+              <strong>{{ formatBytes(protocolTotal(protocol.key)) }}</strong>
             </div>
-            <div>
-              <dt>当前速率</dt>
-              <dd>{{ formatRate(protocolRateTotal('unattributed')) }}</dd>
-            </div>
-            <div>
-              <dt>活动代理流</dt>
-              <dd>{{ formatCount(traffic?.active_flows?.unattributed || 0) }}</dd>
-            </div>
-          </dl>
-        </CardContent>
-      </Card>
+            <dl>
+              <div><dt>下行</dt><dd>{{ formatBytes(protocolTraffic(protocol.key).download) }}</dd></div>
+              <div><dt>上行</dt><dd>{{ formatBytes(protocolTraffic(protocol.key).upload) }}</dd></div>
+              <div><dt>当前合计</dt><dd>{{ formatRate(protocolRateTotal(protocol.key)) }}</dd></div>
+            </dl>
+          </div>
+        </div>
+      </article>
+    </section>
     </section>
 
-    <section class="history-section" aria-labelledby="protocol-history-heading">
-      <Card class="traffic-card history-surface">
-        <CardHeader class="analytics-card-header">
-          <div>
-            <span class="workspace-kicker">HISTORICAL SIGNAL</span>
-            <h2 id="protocol-history-heading">协议流量趋势</h2>
-            <CardDescription>按浏览器本地时间查看归档；采样断线以缺口显示，不插值补齐。</CardDescription>
+    <article class="card" data-testid="unattributed-traffic">
+      <header class="card-head">
+        <div class="card-title">
+          <h3>未归属流量</h3>
+          <small>不能安全映射到指定入站的代理流量独立保留，不回填到 Reality 或 Hysteria2。</small>
+        </div>
+        <Badge variant="secondary">{{ unattributedPercent.toFixed(1) }}% 未归属</Badge>
+      </header>
+      <div class="card-body unattributed-body">
+        <div class="coverage">
+          <div class="coverage-line">
+            <span>协议归属覆盖率</span>
+            <strong>{{ coveragePercent.toFixed(1) }}%</strong>
           </div>
-          <Badge variant="outline">每分钟归档</Badge>
-        </CardHeader>
-        <CardContent class="history-content">
-          <ProtocolTrafficChart
-            :history="history"
-            :range="historyRange"
-            :loading="historyLoading"
-            @range="emit('history-range', $event)"
-          />
-        </CardContent>
-      </Card>
-    </section>
+          <Progress :model-value="coveragePercent" :max="100" class="coverage-progress" aria-label="协议归属覆盖率" />
+        </div>
+        <dl class="mini-stats">
+          <div><dt>累计</dt><dd>{{ formatBytes(protocolTotal('unattributed')) }}</dd></div>
+          <div><dt>当前速率</dt><dd>{{ formatRate(protocolRateTotal('unattributed')) }}</dd></div>
+          <div><dt>活动代理流</dt><dd>{{ formatCount(traffic?.active_flows?.unattributed || 0) }}</dd></div>
+        </dl>
+      </div>
+    </article>
 
-    <section class="infrastructure-section" aria-labelledby="infrastructure-heading">
-      <h2 id="infrastructure-heading" class="visually-hidden">主机网络、套餐流量与服务器测速</h2>
+    <article class="card">
+      <header class="card-head">
+        <div class="card-title">
+          <h3>协议流量趋势</h3>
+          <small>按分钟归档；采样断线以缺口显示，不插值补齐。</small>
+        </div>
+        <Badge variant="outline">每分钟归档</Badge>
+      </header>
+      <div class="card-body chart-body">
+        <ProtocolTrafficChart
+          :history="history"
+          :range="historyRange"
+          :loading="historyLoading"
+          @range="emit('history-range', $event)"
+        />
+      </div>
+    </article>
 
-      <Card class="traffic-card host-network-surface">
-        <CardHeader class="analytics-card-header">
-          <div>
-            <span class="workspace-kicker">HOST INTERFACE</span>
-            <CardTitle>主机网络</CardTitle>
-            <CardDescription>网卡实时吞吐包含代理、面板、SSH、测速与同机其他进程。</CardDescription>
+    <div class="infra-grid">
+      <article class="card">
+        <header class="card-head">
+          <div class="card-title">
+            <h3>主机网络</h3>
+            <small>网卡吞吐包含代理、面板、SSH、测速与同机其他进程。</small>
           </div>
-          <Badge variant="success"><span class="sample-dot live" aria-hidden="true"></span>实时</Badge>
-        </CardHeader>
-        <CardContent class="network-content">
+          <Badge variant="success"><span class="dot live" aria-hidden="true"></span>实时</Badge>
+        </header>
+        <div class="card-body chart-body host-chart">
           <NetworkChart :samples="samples" />
-        </CardContent>
-        <CardFooter class="host-network-footer">
-          <div>
-            <span>当前网卡吞吐</span>
-            <strong>{{ formatRate(hostLiveTotal) }}</strong>
-          </div>
-          <div>
-            <span>本次启动累计</span>
-            <strong>{{ formatBytes(hostObservedTotal) }}</strong>
-          </div>
-          <div>
-            <span>接收 / 发送</span>
-            <strong>{{ formatBytes(status.rx_total_bytes) }} / {{ formatBytes(status.tx_total_bytes) }}</strong>
-          </div>
-        </CardFooter>
-      </Card>
+        </div>
+        <footer class="foot-3">
+          <div><span>当前网卡吞吐</span><strong>{{ formatRate(hostLiveTotal) }}</strong></div>
+          <div><span>本次启动累计</span><strong>{{ formatBytes(hostObservedTotal) }}</strong></div>
+          <div><span>接收 / 发送</span><strong>{{ formatBytes(status.rx_total_bytes) }} / {{ formatBytes(status.tx_total_bytes) }}</strong></div>
+        </footer>
+      </article>
 
       <div class="service-stack">
-        <Card class="traffic-card service-surface racknerd-surface">
-          <CardHeader class="service-header">
-            <div class="service-heading-row">
-              <span class="service-icon"><Database :size="18" /></span>
-              <div>
-                <span class="workspace-kicker">RACKNERD</span>
-                <CardTitle>本月套餐流量</CardTitle>
-              </div>
+        <article class="card">
+          <header class="card-head">
+            <div class="card-title">
+              <h3>本月套餐流量</h3>
+              <small>RackNerd 官方只读接口</small>
             </div>
             <Badge v-if="racknerd.info" :variant="racknerd.error ? 'warning' : 'success'">
               {{ racknerd.error ? '缓存数据' : '官方数据' }}
             </Badge>
             <Badge v-else variant="secondary">{{ racknerd.configured ? '等待数据' : '未连接' }}</Badge>
-          </CardHeader>
-
-          <CardContent class="service-content">
+          </header>
+          <div class="card-body service-body">
             <template v-if="racknerd.configured && racknerd.info">
               <div class="quota-value">
                 <strong>{{ formatBytes(racknerd.info.bandwidth_used) }}</strong>
                 <span>/ {{ formatBytes(racknerd.info.bandwidth_total) }}</span>
               </div>
-              <div class="quota-progress-label">
+              <div class="quota-label">
                 <span>已使用 {{ racknerdPercent.toFixed(2) }}%</span>
                 <span>剩余 {{ formatBytes(racknerd.info.bandwidth_free) }}</span>
               </div>
               <Progress :model-value="racknerdPercent" :max="100" aria-label="RackNerd 本月套餐流量使用率" />
               <p v-if="racknerd.error" class="service-warning" role="status">显示最近一次成功缓存：{{ racknerd.error }}</p>
-              <p v-else class="service-caption">RackNerd 只读 info 接口 · 每 5 分钟更新</p>
             </template>
 
             <div v-else class="service-empty">
-              <Database :size="26" />
-              <p>{{ racknerd.configured ? racknerd.error || '正在读取 RackNerd 官方套餐流量。' : '连接只读 API 后显示供应商套餐用量。' }}</p>
+              <Database :size="24" aria-hidden="true" />
+              <p>{{ racknerd.configured ? racknerd.error || '正在读取 RackNerd 套餐流量。' : '连接只读 API 后显示供应商套餐用量。' }}</p>
               <Button variant="outline" size="sm" @click="emit('settings')">
-                <Settings2 :size="14" />{{ racknerd.configured ? '检查配置' : '连接 RackNerd' }}
+                <Settings2 :size="14" aria-hidden="true" />{{ racknerd.configured ? '检查配置' : '连接 RackNerd' }}
               </Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </article>
 
-        <Card class="traffic-card service-surface speedtest-surface">
-          <CardHeader class="service-header">
-            <div class="service-heading-row">
-              <span class="service-icon speed"><Gauge :size="18" /></span>
-              <div>
-                <span class="workspace-kicker">LIBRESPEED</span>
-                <CardTitle>服务器测速</CardTitle>
-              </div>
+        <article class="card">
+          <header class="card-head">
+            <div class="card-title">
+              <h3>服务器测速</h3>
+              <small>LibreSpeed · 按需运行</small>
             </div>
             <Badge v-if="speedtest.running || starting" variant="warning">运行中</Badge>
             <Badge v-else-if="speedtest.result" variant="success">最近完成</Badge>
-            <Badge v-else variant="secondary">按需运行</Badge>
-          </CardHeader>
-
-          <CardContent class="service-content speedtest-content">
-            <div v-if="speedtest.result && !speedtest.running && !starting" class="speedtest-readout">
+            <Badge v-else variant="secondary">空闲</Badge>
+          </header>
+          <div class="card-body service-body">
+            <div v-if="speedtest.result && !speedtest.running && !starting" class="speed-readout">
               <div>
-                <span><ArrowDownToLine :size="14" />下载</span>
+                <span><ArrowDownToLine :size="13" aria-hidden="true" />下载</span>
                 <strong>{{ formatMbps(speedtest.result.download_mbps) }}<small> Mbps</small></strong>
               </div>
               <div>
-                <span><ArrowUpFromLine :size="14" />上传</span>
+                <span><ArrowUpFromLine :size="13" aria-hidden="true" />上传</span>
                 <strong>{{ formatMbps(speedtest.result.upload_mbps) }}<small> Mbps</small></strong>
               </div>
               <dl>
@@ -396,130 +336,92 @@ const speedButtonLabel = computed(() => {
               <p>{{ speedtest.result.server_name || 'LibreSpeed' }} · 本次耗流 {{ formatBytes(sumBytes(speedtest.result.bytes_sent, speedtest.result.bytes_received)) }}</p>
             </div>
 
-            <div v-else-if="speedtest.running || starting" class="speedtest-running" role="status" aria-live="polite">
-              <LoaderCircle class="loading-icon" :size="25" />
+            <div v-else-if="speedtest.running || starting" class="speed-running" role="status" aria-live="polite">
+              <LoaderCircle class="loading-icon" :size="24" aria-hidden="true" />
               <div>
                 <strong>{{ starting && !speedtest.running ? '正在连接测速节点' : '正在测量服务器链路' }}</strong>
                 <span>下载 {{ formatMbps(speedtest.live?.download_mbps) }} Mbps · 上传 {{ formatMbps(speedtest.live?.upload_mbps) }} Mbps</span>
               </div>
             </div>
 
-            <div v-else class="service-empty speedtest-empty">
-              <Zap :size="26" />
-              <p>按需测试 VPS 到 LibreSpeed 节点的吞吐、延迟与抖动。</p>
+            <div v-else class="service-empty">
+              <Zap :size="24" aria-hidden="true" />
+              <p>测试 VPS 到 LibreSpeed 节点的吞吐、延迟与抖动。</p>
             </div>
 
             <p v-if="speedtest.error && !speedtest.running" class="service-warning" role="status">{{ speedtest.error }}</p>
-            <Button class="speedtest-action" :disabled="speedtest.running || starting" @click="emit('speedtest')">
-              <LoaderCircle v-if="speedtest.running || starting" class="loading-icon" :size="15" />
-              <Play v-else :size="15" />
+            <Button class="speed-action" :disabled="speedtest.running || starting" @click="emit('speedtest')">
+              <LoaderCircle v-if="speedtest.running || starting" class="loading-icon" :size="15" aria-hidden="true" />
+              <Play v-else :size="15" aria-hidden="true" />
               {{ speedButtonLabel }}
             </Button>
-            <p class="service-caption">测速会短暂占用带宽并计入供应商套餐流量。</p>
-          </CardContent>
-        </Card>
+          </div>
+        </article>
       </div>
-    </section>
+    </div>
 
-    <Alert class="measurement-note" role="note">
-      <Info />
-      <AlertTitle>数据口径</AlertTitle>
-      <AlertDescription>
-        协议流量是 sing-box 观察到的代理有效载荷近似值；采样中断会保留缺口，不用于结算、配额执法或审计。网卡累计包含其他进程，供应商套餐用量以 RackNerd 官方数据为准。
-      </AlertDescription>
-    </Alert>
+    <p class="measurement-note">
+      <Info :size="14" aria-hidden="true" />
+      <span>协议流量是 sing-box 观察到的代理有效载荷近似值；采样中断会保留缺口，不用于结算、配额执法或审计。网卡累计包含其他进程，供应商套餐用量以 RackNerd 官方数据为准。测速会短暂占用带宽并计入套餐流量。</span>
+    </p>
   </div>
 </template>
 
 <style scoped>
-:global(.control-main:has(.traffic-workspace)) {
-  box-sizing: border-box;
-}
-
-.traffic-workspace {
-  --workspace-shadow: 0 0.7rem 2rem color-mix(in oklab, var(--foreground) 4%, transparent);
-  --reality-accent: var(--chart-1);
-  --hysteria-accent: var(--chart-2);
-  display: grid;
-  gap: 1rem;
-  min-width: 0;
-  color: var(--foreground);
-  font-variant-numeric: tabular-nums;
-}
-
-.protocol-live-section {
+.traffic {
+  --hairline: color-mix(in srgb, var(--border) 78%, transparent);
+  --hairline-soft: color-mix(in srgb, var(--border) 48%, transparent);
   display: grid;
   gap: 0.85rem;
   min-width: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.section-intro,
-.analytics-card-header,
-.attribution-header,
-.service-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.section-intro {
-  padding: 0.15rem 0.1rem 0.25rem;
-}
-
-.section-intro > div:first-child,
-.analytics-card-header > div:first-child,
-.attribution-header > div:first-child {
+.live-section {
   min-width: 0;
-}
-
-.workspace-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.58rem;
-  font-weight: 750;
-  letter-spacing: 0.13em;
-  line-height: 1.4;
-}
-
-.section-intro h2,
-.analytics-card-header h2 {
-  margin: 0.38rem 0 0;
-  color: var(--foreground);
-  font-size: 1.15rem;
-  font-weight: 680;
-  letter-spacing: -0.025em;
-}
-
-.section-intro p {
-  max-width: 44rem;
-  margin: 0.42rem 0 0;
-  color: var(--muted-foreground);
-  font-size: 0.72rem;
-  line-height: 1.6;
-}
-
-.sample-state {
   display: grid;
-  justify-items: end;
-  gap: 0.38rem;
-  flex: 0 0 auto;
+  gap: 0.75rem;
+  padding-block: 0.1rem 0.15rem;
 }
 
-.sample-state > span:last-child {
+.topline {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.topline h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  line-height: 1.25;
+}
+
+.topline-right {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.sampled {
+  min-width: 0;
   color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.57rem;
+  font-size: 0.67rem;
+  white-space: nowrap;
 }
 
-.sample-badge {
-  gap: 0.4rem;
+.live-badge {
+  gap: 0.35rem;
+  border-radius: 0.35rem;
 }
 
-.sample-dot {
+.dot {
   width: 0.38rem;
   height: 0.38rem;
   display: inline-block;
@@ -528,455 +430,386 @@ const speedButtonLabel = computed(() => {
   background: currentColor;
 }
 
-.sample-dot.live {
-  box-shadow: 0 0 0 0.2rem color-mix(in oklab, currentColor 14%, transparent);
+.dot.live {
+  box-shadow: 0 0 0 0.16rem color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.sample-dot.stale {
+.dot.stale {
   animation: sample-pulse 1.8s ease-in-out infinite;
 }
 
 .traffic-alert {
   margin: 0;
+  border-color: var(--hairline);
+  border-radius: 0.5rem;
+  padding-block: 0.65rem;
+  box-shadow: none;
 }
 
 .traffic-alert :deep([data-slot='alert-description']) {
   color: inherit;
 }
 
-.traffic-card {
-  min-width: 0;
-  gap: 0;
-  overflow: hidden;
-  padding: 0;
-  border-color: color-mix(in oklab, var(--border) 90%, var(--foreground));
-  background: var(--card);
-  box-shadow: var(--workspace-shadow);
-}
+/* ---------- stat cards ---------- */
 
-.telemetry-grid {
+.stat-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.7rem;
+  gap: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 0.55rem;
+  overflow: hidden;
+  background: var(--card);
 }
 
-.telemetry-card {
+.stat {
   position: relative;
+  min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 0.32rem;
+  padding: 0.72rem 0.8rem;
+  background: var(--card);
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--hairline);
+}
+
+.stat-head {
+  display: flex;
   align-items: center;
-  gap: 0.28rem 0.65rem;
-  padding: 0.9rem;
+  gap: 0.35rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
+.stat-head svg {
+  color: var(--muted-foreground);
+}
+
+.stat-value {
+  font-size: clamp(1.02rem, 1.45vw, 1.22rem);
+  font-weight: 680;
+  letter-spacing: -0.018em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.stat-pair {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.stat-pair span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- cards ---------- */
+
+.card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  border-radius: 0.55rem;
+  background: var(--card);
   box-shadow: none;
 }
 
-.telemetry-card::after {
-  position: absolute;
-  inset: auto 0 0;
-  height: 2px;
-  background: color-mix(in oklab, var(--primary) 55%, transparent);
-  content: '';
-}
-
-.telemetry-card.coverage-summary::after {
-  background: color-mix(in oklab, var(--chart-3) 70%, transparent);
-}
-
-.telemetry-icon {
-  grid-row: 1 / 3;
-  width: 2.1rem;
-  height: 2.1rem;
-  display: grid;
-  place-items: center;
-  border-radius: 0.6rem;
-  background: color-mix(in oklab, var(--primary) 11%, var(--card));
-  color: var(--primary);
-}
-
-.telemetry-card > span {
+.card-head {
   min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.68rem 0.8rem;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.card-title {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.card-title h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  line-height: 1.3;
+}
+
+.card-title small {
+  max-width: 52rem;
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+  line-height: 1.42;
+}
+
+.card-body {
+  min-width: 0;
+  padding: 0.78rem 0.8rem;
+}
+
+.proto-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.card.reality {
+  --accent: var(--chart-1);
+  border-top-color: color-mix(in srgb, var(--chart-1) 72%, var(--hairline));
+}
+
+.card.hysteria2 {
+  --accent: var(--chart-2);
+  border-top-color: color-mix(in srgb, var(--chart-2) 72%, var(--hairline));
+}
+
+.flow-badge {
+  gap: 0.35rem;
+}
+
+.card.reality .flow-badge {
+  color: var(--chart-1);
+}
+
+.card.hysteria2 .flow-badge {
+  color: var(--chart-2);
+}
+
+.rate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.rate-grid > div {
+  min-width: 0;
+  padding: 0.62rem 0.68rem;
+  background: color-mix(in srgb, var(--accent) 3.5%, var(--card));
+}
+
+.rate-grid > div + div {
+  border-left: 1px solid var(--hairline-soft);
+}
+
+.rate-grid span {
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+}
+
+.rate-grid span svg {
+  color: var(--accent);
+}
+
+.rate-grid strong {
+  display: block;
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.cumulative {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  align-items: end;
+  gap: 0.8rem;
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--hairline-soft);
+}
+
+.cumulative-main > span {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.64rem;
+}
+
+.cumulative-main > strong {
+  display: block;
+  margin-top: 0.2rem;
+  overflow-wrap: anywhere;
+  font-size: 1rem;
+  letter-spacing: -0.018em;
+}
+
+.cumulative dl {
+  display: grid;
+  gap: 0.24rem;
+  margin: 0;
+}
+
+.cumulative dl > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.66rem;
+}
+
+.cumulative dt {
+  color: var(--muted-foreground);
+}
+
+.cumulative dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-weight: 600;
+}
+
+/* ---------- unattributed ---------- */
+
+.unattributed-body {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.85fr) minmax(0, 1.15fr);
+  align-items: center;
+  gap: 0.9rem;
+}
+
+.coverage-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.coverage-line span {
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+}
+
+.coverage-line strong {
+  font-size: 1rem;
+  letter-spacing: -0.018em;
+}
+
+.coverage-progress {
+  height: 0.28rem;
+  margin-top: 0.52rem;
+  border-radius: 0;
+}
+
+.mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0.4rem;
+  overflow: hidden;
+}
+
+.mini-stats > div {
+  min-width: 0;
+  padding: 0.58rem 0.62rem;
+  background: color-mix(in srgb, var(--muted) 55%, var(--card));
+}
+
+.mini-stats > div + div {
+  border-left: 1px solid var(--hairline-soft);
+}
+
+.mini-stats dt {
   color: var(--muted-foreground);
   font-size: 0.62rem;
 }
 
-.telemetry-card > strong {
-  min-width: 0;
+.mini-stats dd {
+  margin: 0.24rem 0 0;
   overflow-wrap: anywhere;
-  font-size: clamp(0.88rem, 1.35vw, 1.08rem);
-  line-height: 1.2;
-  letter-spacing: -0.025em;
+  font-size: 0.75rem;
+  font-weight: 650;
 }
 
-.telemetry-pair {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.45rem;
-  min-width: 0;
-  margin-top: 0.48rem;
-  color: var(--muted-foreground);
-  font-size: 0.55rem;
+/* ---------- charts ---------- */
+
+.chart-body {
+  padding: 0.72rem 0.8rem 0.78rem;
 }
 
-.telemetry-pair span {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  overflow-wrap: anywhere;
-}
+/* ---------- infrastructure ---------- */
 
-.protocol-surface-grid {
+.infra-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem;
-}
-
-.live-protocol-surface {
-  --protocol-accent: var(--reality-accent);
-  position: relative;
-}
-
-.live-protocol-surface.hysteria2 {
-  --protocol-accent: var(--hysteria-accent);
-}
-
-.live-protocol-surface::before {
-  position: absolute;
-  z-index: 1;
-  inset: 0 0 auto;
-  height: 3px;
-  background: var(--protocol-accent);
-  content: '';
-}
-
-.protocol-surface-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  padding: 1rem 1rem 0.85rem;
-}
-
-.protocol-identity,
-.service-heading-row {
-  min-width: 0;
-  display: flex;
-  align-items: center;
+  grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.72fr);
   gap: 0.7rem;
-}
-
-.protocol-mark,
-.service-icon {
-  width: 2.35rem;
-  height: 2.35rem;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  border-radius: 0.68rem;
-  background: color-mix(in oklab, var(--protocol-accent) 12%, var(--card));
-  color: var(--protocol-accent);
-}
-
-.protocol-identity > div,
-.service-heading-row > div {
-  min-width: 0;
-}
-
-.protocol-identity > div > span {
-  display: block;
-  color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.53rem;
-  letter-spacing: 0.08em;
-}
-
-.protocol-identity h3,
-.service-heading-row h3 {
-  margin-top: 0.25rem;
-  font-size: 0.95rem;
-  letter-spacing: -0.02em;
-}
-
-.flow-badge {
-  color: var(--protocol-accent);
-}
-
-.protocol-surface-content {
-  display: grid;
-  gap: 0.9rem;
-  padding: 0 1rem 1rem;
-}
-
-.protocol-rate-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-}
-
-.protocol-rate-grid > div {
-  min-width: 0;
-  padding: 0.8rem;
-  border: 1px solid color-mix(in oklab, var(--protocol-accent) 14%, var(--border));
-  border-radius: 0.65rem;
-  background: color-mix(in oklab, var(--protocol-accent) 5%, var(--card));
-}
-
-.protocol-rate-grid span,
-.protocol-rate-grid strong {
-  display: block;
-}
-
-.protocol-rate-grid span {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  color: var(--muted-foreground);
-  font-size: 0.59rem;
-}
-
-.protocol-rate-grid span svg {
-  color: var(--protocol-accent);
-}
-
-.protocol-rate-grid strong {
-  margin-top: 0.5rem;
-  overflow-wrap: anywhere;
-  font-size: clamp(0.82rem, 1.45vw, 1rem);
-}
-
-.protocol-cumulative {
-  display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  align-items: end;
-  gap: 1rem;
-}
-
-.protocol-cumulative > div > span,
-.coverage-readout > div > span {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: 0.58rem;
-}
-
-.protocol-cumulative > div > strong,
-.coverage-readout > div > strong {
-  display: block;
-  margin-top: 0.28rem;
-  overflow-wrap: anywhere;
-  font-size: 1.08rem;
-  letter-spacing: -0.025em;
-}
-
-.protocol-cumulative dl,
-.unattributed-metrics,
-.speedtest-readout dl {
-  margin: 0;
-}
-
-.protocol-cumulative dl {
-  display: grid;
-  gap: 0.28rem;
-}
-
-.protocol-cumulative dl > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.55rem;
-}
-
-.protocol-cumulative dt,
-.protocol-cumulative dd {
-  font-size: 0.57rem;
-}
-
-.protocol-cumulative dt {
-  color: var(--muted-foreground);
-}
-
-.protocol-cumulative dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  text-align: right;
-}
-
-.attribution-header {
-  align-items: center;
-  padding: 1rem 1rem 0;
-}
-
-.attribution-header h3 {
-  margin-top: 0.32rem;
-  font-size: 0.95rem;
-}
-
-.attribution-header p,
-.analytics-card-header p {
-  margin-top: 0.32rem;
-  font-size: 0.65rem;
-  line-height: 1.5;
-}
-
-.attribution-content {
-  display: grid;
-  grid-template-columns: minmax(15rem, 0.85fr) minmax(0, 1.15fr);
-  align-items: center;
-  gap: 1.15rem;
-  padding: 0.9rem 1rem 1rem;
-}
-
-.coverage-readout {
-  min-width: 0;
-}
-
-.coverage-readout > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.8rem;
-}
-
-.coverage-progress {
-  height: 0.45rem;
-  margin-top: 0.65rem;
-}
-
-.coverage-readout small {
-  display: block;
-  margin-top: 0.45rem;
-  color: var(--muted-foreground);
-  font-size: 0.54rem;
-  line-height: 1.45;
-}
-
-.unattributed-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.55rem;
-}
-
-.unattributed-metrics > div {
-  min-width: 0;
-  padding: 0.72rem;
-  border: 1px solid var(--border);
-  border-radius: 0.62rem;
-  background: var(--muted);
-}
-
-.unattributed-metrics dt {
-  color: var(--muted-foreground);
-  font-size: 0.55rem;
-}
-
-.unattributed-metrics dd {
-  margin: 0.32rem 0 0;
-  overflow-wrap: anywhere;
-  font-size: 0.74rem;
-  font-weight: 680;
-}
-
-.history-section,
-.infrastructure-section {
-  min-width: 0;
-}
-
-.analytics-card-header {
-  align-items: center;
-  padding: 1rem 1rem 0.8rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.analytics-card-header h3 {
-  margin-top: 0.35rem;
-  font-size: 0.95rem;
-}
-
-.history-content {
-  padding: 0.9rem 1rem 1rem;
-}
-
-.infrastructure-section {
-  display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(19rem, 0.72fr);
   align-items: stretch;
-  gap: 0.85rem;
 }
 
-.host-network-surface {
-  height: 100%;
-}
-
-.network-content {
-  min-height: 16rem;
+.host-chart {
+  min-height: 13.5rem;
   display: flex;
-  padding: 0.9rem 1rem;
 }
 
-.host-network-footer {
+.foot-3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0;
-  padding: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--hairline);
 }
 
-.host-network-footer > div {
+.foot-3 > div {
   min-width: 0;
-  padding: 0.8rem 1rem;
+  padding: 0.62rem 0.72rem;
 }
 
-.host-network-footer > div + div {
-  border-left: 1px solid var(--border);
+.foot-3 > div + div {
+  border-left: 1px solid var(--hairline);
 }
 
-.host-network-footer span,
-.host-network-footer strong {
+.foot-3 span {
   display: block;
-}
-
-.host-network-footer span {
   color: var(--muted-foreground);
-  font-size: 0.54rem;
+  font-size: 0.62rem;
 }
 
-.host-network-footer strong {
-  margin-top: 0.3rem;
+.foot-3 strong {
+  display: block;
+  margin-top: 0.22rem;
   overflow-wrap: anywhere;
-  font-size: 0.68rem;
+  font-size: 0.73rem;
 }
 
 .service-stack {
   display: grid;
   grid-template-rows: repeat(2, minmax(0, 1fr));
-  gap: 0.85rem;
+  gap: 0.7rem;
   min-width: 0;
 }
 
-.service-surface {
+.service-stack > .card {
   height: 100%;
 }
 
-.service-header {
-  align-items: center;
-  padding: 0.95rem 1rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.service-icon {
-  --protocol-accent: var(--chart-4);
-}
-
-.service-icon.speed {
-  --protocol-accent: var(--chart-3);
-}
-
-.service-content {
+.service-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  gap: 0.5rem;
   min-height: 0;
-  padding: 0.9rem 1rem 1rem;
 }
 
 .quota-value {
@@ -987,31 +820,30 @@ const speedButtonLabel = computed(() => {
 }
 
 .quota-value strong {
-  font-size: 1.35rem;
-  letter-spacing: -0.04em;
+  font-size: 1.18rem;
+  letter-spacing: -0.018em;
 }
 
 .quota-value span {
   color: var(--muted-foreground);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
 }
 
-.quota-progress-label {
+.quota-label {
   display: flex;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin: 0.8rem 0 0.42rem;
+  gap: 0.45rem;
   color: var(--muted-foreground);
-  font-size: 0.56rem;
+  font-size: 0.65rem;
 }
 
 .service-caption,
 .service-warning,
-.speedtest-readout > p {
-  margin: 0.65rem 0 0;
+.speed-readout > p {
+  margin: 0.25rem 0 0;
   color: var(--muted-foreground);
-  font-size: 0.55rem;
-  line-height: 1.5;
+  font-size: 0.64rem;
+  line-height: 1.45;
 }
 
 .service-warning {
@@ -1019,124 +851,124 @@ const speedButtonLabel = computed(() => {
 }
 
 .service-empty {
-  min-height: 8.5rem;
+  min-height: 6.2rem;
+  flex: 1 1 auto;
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 0.65rem;
+  gap: 0.5rem;
   color: var(--muted-foreground);
   text-align: center;
 }
 
 .service-empty p {
-  max-width: 19rem;
+  max-width: 18rem;
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.64rem;
-  line-height: 1.55;
+  font-size: 0.69rem;
+  line-height: 1.45;
 }
 
-.speedtest-content {
-  gap: 0.6rem;
-}
-
-.speedtest-readout {
+.speed-readout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
+  gap: 0;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0.4rem;
+  overflow: hidden;
 }
 
-.speedtest-readout > div {
+.speed-readout > div {
   min-width: 0;
-  padding: 0.65rem;
-  border-radius: 0.6rem;
-  background: var(--muted);
+  padding: 0.58rem 0.64rem;
+  background: color-mix(in srgb, var(--muted) 55%, var(--card));
 }
 
-.speedtest-readout > div > span {
+.speed-readout > div + div {
+  border-left: 1px solid var(--hairline-soft);
+}
+
+.speed-readout > div > span {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.24rem;
   color: var(--muted-foreground);
-  font-size: 0.55rem;
+  font-size: 0.65rem;
 }
 
-.speedtest-readout > div > strong {
+.speed-readout > div > strong {
   display: block;
-  margin-top: 0.35rem;
+  margin-top: 0.24rem;
   overflow-wrap: anywhere;
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
-.speedtest-readout strong small {
+.speed-readout strong small {
   color: var(--muted-foreground);
-  font-size: 0.52rem;
+  font-size: 0.62rem;
   font-weight: 500;
 }
 
-.speedtest-readout dl {
+.speed-readout dl {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.5rem;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.52rem 0.64rem 0;
+  border-top: 1px solid var(--hairline-soft);
 }
 
-.speedtest-readout dl > div {
+.speed-readout dl > div {
   display: flex;
   justify-content: space-between;
   gap: 0.4rem;
-  padding: 0 0.2rem;
-  font-size: 0.56rem;
+  font-size: 0.66rem;
 }
 
-.speedtest-readout dt {
+.speed-readout dt {
   color: var(--muted-foreground);
 }
 
-.speedtest-readout dd {
+.speed-readout dd {
   margin: 0;
-  font-weight: 650;
+  font-weight: 600;
 }
 
-.speedtest-readout > p {
+.speed-readout > p {
   grid-column: 1 / -1;
-  margin-top: 0;
+  padding: 0 0.64rem 0.55rem;
 }
 
-.speedtest-running {
-  min-height: 6.5rem;
+.speed-running {
+  flex: 1 1 auto;
+  min-height: 5.2rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.7rem;
-  padding: 0.9rem;
-  border: 1px dashed color-mix(in oklab, var(--primary) 35%, var(--border));
-  border-radius: 0.65rem;
-  background: color-mix(in oklab, var(--primary) 5%, var(--card));
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 0.4rem;
+  background: color-mix(in srgb, var(--primary) 3%, var(--card));
   color: var(--primary);
 }
 
-.speedtest-running strong,
-.speedtest-running span {
+.speed-running strong {
   display: block;
-}
-
-.speedtest-running strong {
   color: var(--foreground);
-  font-size: 0.7rem;
+  font-size: 0.76rem;
 }
 
-.speedtest-running span {
-  margin-top: 0.25rem;
+.speed-running span {
+  display: block;
+  margin-top: 0.22rem;
   color: var(--muted-foreground);
-  font-size: 0.56rem;
+  font-size: 0.66rem;
+  overflow-wrap: anywhere;
 }
 
-.speedtest-empty {
-  min-height: 5.8rem;
-}
-
-.speedtest-action {
+.speed-action {
   width: 100%;
   margin-top: auto;
 }
@@ -1146,28 +978,21 @@ const speedButtonLabel = computed(() => {
 }
 
 .measurement-note {
-  width: auto;
-  min-width: 0;
-  justify-self: stretch;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
   margin: 0;
-  background: color-mix(in oklab, var(--muted) 62%, var(--card));
-}
-
-.measurement-note :deep([data-slot='alert-description']) {
+  padding-top: 0.58rem;
+  border-top: 1px solid var(--hairline-soft);
   color: var(--muted-foreground);
+  font-size: 0.65rem;
   line-height: 1.55;
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  margin: -1px;
-  padding: 0;
-  border: 0;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+.measurement-note svg {
+  flex: 0 0 auto;
+  margin-top: 0.15rem;
+  color: var(--muted-foreground);
 }
 
 @keyframes sample-pulse {
@@ -1178,12 +1003,26 @@ const speedButtonLabel = computed(() => {
   to { transform: rotate(360deg); }
 }
 
+/* ---------- responsive ---------- */
+
 @media (max-width: 1180px) {
-  .telemetry-grid {
+  .stat-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .infrastructure-section {
+  .stat + .stat {
+    border-left: 0;
+  }
+
+  .stat:nth-child(even) {
+    border-left: 1px solid var(--hairline);
+  }
+
+  .stat:nth-child(n + 3) {
+    border-top: 1px solid var(--hairline);
+  }
+
+  .infra-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1194,99 +1033,105 @@ const speedButtonLabel = computed(() => {
 }
 
 @media (max-width: 820px) {
-  .protocol-surface-grid,
+  .proto-grid,
   .service-stack {
     grid-template-columns: 1fr;
   }
 
-  .attribution-content {
+  .unattributed-body {
     grid-template-columns: 1fr;
   }
 
-  .network-content {
-    min-height: 13rem;
+  .host-chart {
+    min-height: 12rem;
   }
 }
 
 @media (max-width: 620px) {
-  .traffic-workspace {
-    gap: 0.8rem;
-  }
-
-  .section-intro,
-  .analytics-card-header,
-  .attribution-header {
+  .topline {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .sample-state {
+  .topline-right {
     width: 100%;
-    justify-items: start;
+    justify-content: space-between;
   }
 
-  .telemetry-grid {
+  .stat-grid {
     grid-template-columns: 1fr;
   }
 
-  .protocol-surface-header,
-  .service-header {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .measurement-note {
-    max-width: 100%;
-  }
-
-  .flow-badge,
-  .service-header > [data-slot='badge'] {
-    margin-left: 3.05rem;
-  }
-
-  .protocol-rate-grid,
-  .protocol-cumulative,
-  .unattributed-metrics {
-    grid-template-columns: 1fr;
-  }
-
-  .protocol-cumulative {
-    align-items: stretch;
-  }
-
-  .host-network-footer {
-    grid-template-columns: 1fr;
-  }
-
-  .host-network-footer > div + div {
-    border-top: 1px solid var(--border);
+  .stat:nth-child(even) {
     border-left: 0;
   }
 
-  .quota-progress-label {
-    align-items: flex-start;
-    flex-direction: column;
+  .stat + .stat,
+  .stat:nth-child(n + 3) {
+    border-top: 1px solid var(--hairline);
+  }
+
+  .rate-grid,
+  .cumulative,
+  .mini-stats,
+  .speed-readout {
+    grid-template-columns: 1fr;
+  }
+
+  .rate-grid > div + div,
+  .mini-stats > div + div,
+  .speed-readout > div + div {
+    border-top: 1px solid var(--hairline-soft);
+    border-left: 0;
+  }
+
+  .cumulative {
+    align-items: stretch;
+  }
+
+  .foot-3 {
+    grid-template-columns: 1fr;
+  }
+
+  .foot-3 > div + div {
+    border-top: 1px solid var(--hairline);
+    border-left: 0;
   }
 }
 
 @media (max-width: 420px) {
-  .telemetry-pair {
+  .traffic {
+    gap: 0.7rem;
+  }
+
+  .topline-right {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .speedtest-readout {
-    grid-template-columns: 1fr;
+  .card-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.45rem;
   }
 
-  .speedtest-readout dl,
-  .speedtest-readout > p {
-    grid-column: auto;
+  .card-head > :last-child {
+    max-width: 100%;
+  }
+
+  .stat-pair {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .quota-label {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sample-dot.stale,
+  .dot.stale,
   .loading-icon {
     animation: none;
   }

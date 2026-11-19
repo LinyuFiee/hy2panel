@@ -6,7 +6,7 @@ import { colorMode } from '@/styles/theme'
 const props = defineProps({
   theme: { type: String, default: undefined },
   position: { type: String, default: 'bottom-right' },
-  richColors: { type: Boolean, default: true },
+  richColors: { type: Boolean, default: false },
   closeButton: { type: Boolean, default: true },
   expand: { type: Boolean, default: false },
   duration: { type: Number, default: 4000 },

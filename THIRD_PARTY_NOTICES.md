@@ -30,6 +30,10 @@ License: MIT
 
 Copyright (c) 2026 Lucas Marques
 
+hy2panel directly embeds selected package figures through Hairline's DOM API.
+The Reality/Hysteria2 protocol path in `NodeFlowFigure.vue` is project-owned
+and is not part of Hairline.
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights

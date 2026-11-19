@@ -108,8 +108,9 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          mkdir -p release/bundle/dist release/bundle/scripts/lib release/bundle/systemd release/bundle/packaging
+          mkdir -p release/bundle/dist release/bundle/scripts/lib release/bundle/systemd release/bundle/packaging release/bundle/licenses
           install -m 0755 dist/hy2panel-linux-amd64 release/bundle/dist/hy2panel-linux-amd64
+          install -m 0644 THIRD_PARTY_NOTICES.md release/bundle/licenses/THIRD_PARTY_NOTICES.md
 
           scripts=(
             scripts/hy2
@@ -171,6 +172,7 @@ jobs:
           tar -tzf "release/${BUNDLE}" | sed -E 's#^\./##' | sed '/^$/d; /\/$/d' | sort > "${actual}"
           cat > "${expected}" <<'EOF'
           dist/hy2panel-linux-amd64
+          licenses/THIRD_PARTY_NOTICES.md
           packaging/sing-box-versions.json
           scripts/99-hy2panel.conf
           scripts/cert-deploy.sh
@@ -211,6 +213,9 @@ jobs:
           install -m 0755 scripts/migrate-v04-to-v05.sh release/migrate-v04-to-v05.sh
           sed -i "s/^TARGET_VERSION=.*/TARGET_VERSION=${RELEASE_TAG}/" release/migrate-v04-to-v05.sh
           grep -q "^TARGET_VERSION=${RELEASE_TAG}$" release/migrate-v04-to-v05.sh
+          bash -n release/migrate-v04-to-v05.sh
+          source release/migrate-v04-to-v05.sh
+          hy2panel_valid_migration_target "${TARGET_VERSION}"
 
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v3

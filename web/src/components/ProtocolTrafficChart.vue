@@ -1,6 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import { AlertTriangle, LoaderCircle } from '@lucide/vue'
+import HairlineFigure from './HairlineFigure.vue'
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
 import { formatBytes, formatTimestamp } from '../utils'
 
@@ -20,10 +21,13 @@ const rangeOptions = [
 ]
 const protocols = ['reality', 'hysteria2']
 const width = 720
-const left = 12
-const right = 708
-const top = 18
-const bottom = 166
+const height = 190
+const left = 20
+const right = 700
+const top = 16
+const bottom = 164
+const horizontalGuides = [top, 53, 90, 127, bottom]
+const verticalGuides = [left, 190, 360, 530, right]
 
 const points = computed(() => Array.isArray(props.history?.points) ? props.history.points : [])
 const maximum = computed(() => {
@@ -31,7 +35,7 @@ const maximum = computed(() => {
     if (point?.gap) return []
     return protocols.map(protocol => trafficTotal(point, protocol))
   }).filter(Number.isFinite)
-  return Math.max(1, ...values) * 1.12
+  return niceMaximum(Math.max(0, ...values))
 })
 
 const chartPoints = computed(() => {
@@ -58,6 +62,17 @@ const axisLabels = computed(() => {
 
 const gapCount = computed(() => chartPoints.value.filter(point => point.gap).length)
 const latestPoint = computed(() => [...chartPoints.value].reverse().find(point => !point.gap) || null)
+const validPointCount = computed(() => chartPoints.value.length - gapCount.value)
+const historyUnavailable = computed(() => props.history?.available === false)
+const emptyTitle = computed(() => historyUnavailable.value ? '协议历史暂不可用' : '等待历史数据')
+const emptyDescription = computed(() => historyUnavailable.value
+  ? '此处为状态示意图，不是协议流量数据。实时卡与主机网络不受影响，请稍后重试。'
+  : '此处为状态示意图，不是协议流量数据。完成第一批归档后会在这里显示趋势。')
+const emptyFigureLabel = computed(() => historyUnavailable.value
+  ? '协议历史不可用状态示意图，非真实流量数据'
+  : '协议历史等待归档状态示意图，非真实流量数据')
+const chartTitle = computed(() => `协议每分钟流量历史：Reality ${formatBytes(latestPoint.value?.values?.reality || 0)} 每分钟，Hysteria2 ${formatBytes(latestPoint.value?.values?.hysteria2 || 0)} 每分钟`)
+const chartDescription = computed(() => `共 ${chartPoints.value.length} 个时间段，其中 ${validPointCount.value} 个有效时间段，${gapCount.value} 个数据中断时间段。实线为 Reality，虚线为 Hysteria2；断线不插值。纵轴上限 ${formatBytes(maximum.value)} 每分钟。`)
 
 function trafficTotal(point, protocol) {
   const traffic = point?.traffic?.[protocol] || {}
@@ -65,6 +80,15 @@ function trafficTotal(point, protocol) {
   const download = Number(traffic.download || 0)
   const total = (Number.isFinite(upload) && upload > 0 ? upload : 0) + (Number.isFinite(download) && download > 0 ? download : 0)
   return Number.isFinite(total) ? total : 0
+}
+
+function niceMaximum(value) {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  const padded = value * 1.08
+  const magnitude = 10 ** Math.floor(Math.log10(padded))
+  const normalized = padded / magnitude
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10
+  return step * magnitude
 }
 
 function yFor(value) {
@@ -86,20 +110,30 @@ function segments(protocol) {
   return result
 }
 
+function number(value) {
+  return Number(value.toFixed(2))
+}
+
 function line(segment) {
   if (!segment.length) return ''
   if (segment.length === 1) {
     const [[x, y]] = segment
-    const edge = Math.min(right, x + 0.01)
-    return `M${x.toFixed(1)},${y.toFixed(1)} L${edge.toFixed(2)},${y.toFixed(1)}`
+    const edge = Math.min(right, x + 0.5)
+    return `M ${number(x)} ${number(y)} L ${number(edge)} ${number(y)}`
   }
   return segment
-    .map(([x, y], index) => `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`)
+    .map(([x, y], index) => `${index ? 'L' : 'M'} ${number(x)} ${number(y)}`)
     .join(' ')
 }
 
+function gapWidth() {
+  const spacing = chartPoints.value.length > 1 ? (right - left) / (chartPoints.value.length - 1) : 4
+  return Math.max(2, Math.min(6, spacing * 0.64))
+}
+
 function gapX(point) {
-  return Math.max(left - 1, Math.min(right - 1, point.x - 1.5))
+  const width = gapWidth()
+  return Math.max(left, Math.min(right - width, point.x - width / 2))
 }
 
 function changeRange(value) {
@@ -117,7 +151,7 @@ function changeRange(value) {
         variant="outline"
         size="sm"
         :disabled="loading"
-        class="history-toggle-group"
+        class="range-group"
         aria-label="协议流量时间范围"
         @update:model-value="changeRange"
       >
@@ -128,7 +162,7 @@ function changeRange(value) {
           :aria-label="option.label"
           :aria-pressed="range === option.value"
           :disabled="loading"
-          class="history-toggle-item"
+          class="range-item"
         >
           <span class="wide-label">{{ option.label }}</span>
           <span class="compact-label" aria-hidden="true">{{ option.compact }}</span>
@@ -137,54 +171,73 @@ function changeRange(value) {
 
       <div class="archive-state" aria-live="polite">
         <template v-if="loading">
-          <LoaderCircle class="loading-icon" :size="13" />正在更新
+          <LoaderCircle class="loading-icon" :size="13" aria-hidden="true" />正在更新
         </template>
         <template v-else-if="gapCount">
-          <AlertTriangle :size="13" />{{ gapCount }} 个时间段数据中断
+          <AlertTriangle :size="13" aria-hidden="true" />{{ gapCount }} 个时间段数据中断
         </template>
         <template v-else>数据连续</template>
       </div>
     </div>
 
     <div class="protocol-legend" aria-label="最新一分钟协议流量">
-      <span class="reality-metric">
-        <i aria-hidden="true"></i>
-        <span>Reality</span>
+      <span class="metric reality-metric">
+        <i class="series-dot" aria-hidden="true"></i>
+        <span class="metric-label">Reality</span>
         <strong>{{ formatBytes(latestPoint?.values?.reality || 0) }}/分钟</strong>
       </span>
-      <span class="hysteria2-metric">
-        <i aria-hidden="true"></i>
-        <span>Hysteria2</span>
+      <span class="metric hysteria2-metric">
+        <i class="series-dot hysteria2-dot" aria-hidden="true"></i>
+        <span class="metric-label">Hysteria2</span>
         <strong>{{ formatBytes(latestPoint?.values?.hysteria2 || 0) }}/分钟</strong>
       </span>
     </div>
 
     <div v-if="history?.available && chartPoints.length" class="protocol-chart-canvas">
-      <svg viewBox="0 0 720 190" role="img" aria-label="协议每分钟流量历史曲线；断线时曲线留有缺口" preserveAspectRatio="none">
-        <line v-for="y in [18, 55, 92, 129, 166]" :key="y" x1="12" :y1="y" x2="708" :y2="y" class="chart-grid" />
-        <line v-for="x in [12, 186, 360, 534, 708]" :key="x" :x1="x" y1="18" :x2="x" y2="166" class="chart-grid vertical" />
-        <rect
-          v-for="point in chartPoints.filter(item => item.gap)"
-          :key="`gap-${point.minute}`"
-          :x="gapX(point)"
-          y="18"
-          width="3"
-          height="148"
-          rx="1.5"
-          class="protocol-gap"
-        />
-        <path
-          v-for="(segment, index) in segments('reality')"
-          :key="`reality-${index}`"
-          :d="line(segment)"
-          class="chart-line reality-line"
-        />
-        <path
-          v-for="(segment, index) in segments('hysteria2')"
-          :key="`hysteria2-${index}`"
-          :d="line(segment)"
-          class="chart-line hysteria2-line"
-        />
+      <svg
+        :viewBox="`0 0 ${width} ${height}`"
+        role="img"
+        aria-labelledby="protocol-history-title protocol-history-description"
+        preserveAspectRatio="none"
+        focusable="false"
+      >
+        <title id="protocol-history-title">{{ chartTitle }}</title>
+        <desc id="protocol-history-description">{{ chartDescription }}</desc>
+        <defs>
+          <clipPath id="protocol-history-plot-clip">
+            <rect :x="left" :y="top" :width="right - left" :height="bottom - top" />
+          </clipPath>
+          <pattern id="protocol-gap-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <line x1="0" y1="0" x2="0" y2="4" class="protocol-gap-hatch-line" />
+          </pattern>
+        </defs>
+        <g aria-hidden="true">
+          <line v-for="y in horizontalGuides" :key="`h-${y}`" :x1="left" :y1="y" :x2="right" :y2="y" class="chart-grid" />
+          <line v-for="x in verticalGuides" :key="`v-${x}`" :x1="x" :y1="top" :x2="x" :y2="bottom" class="chart-grid vertical" />
+        </g>
+        <g clip-path="url(#protocol-history-plot-clip)" aria-hidden="true">
+          <rect
+            v-for="point in chartPoints.filter(item => item.gap)"
+            :key="`gap-${point.minute}`"
+            :x="gapX(point)"
+            :y="top"
+            :width="gapWidth()"
+            :height="bottom - top"
+            class="protocol-gap"
+          />
+          <path
+            v-for="(segment, index) in segments('reality')"
+            :key="`reality-${index}`"
+            :d="line(segment)"
+            class="chart-line reality-line"
+          />
+          <path
+            v-for="(segment, index) in segments('hysteria2')"
+            :key="`hysteria2-${index}`"
+            :d="line(segment)"
+            class="chart-line hysteria2-line"
+          />
+        </g>
       </svg>
       <div class="protocol-chart-axis" aria-hidden="true">
         <span
@@ -195,10 +248,19 @@ function changeRange(value) {
       </div>
     </div>
 
-    <div v-else class="protocol-chart-empty" role="status">
-      <span class="empty-orbit" aria-hidden="true"><i></i></span>
-      <strong>{{ history?.available === false ? '协议历史暂不可用' : '等待历史数据' }}</strong>
-      <p>{{ history?.available === false ? '实时卡与主机网络不受影响，请稍后重试。' : '完成第一批归档后会在这里显示趋势。' }}</p>
+    <div v-else class="protocol-chart-empty" role="status" aria-live="polite">
+      <HairlineFigure
+        figure="plot"
+        name="plot"
+        :play="false"
+        theme="auto"
+        :label="emptyFigureLabel"
+        class="empty-figure"
+      />
+      <div class="empty-copy">
+        <strong>{{ emptyTitle }}</strong>
+        <p>{{ emptyDescription }}</p>
+      </div>
     </div>
   </div>
 </template>
@@ -210,28 +272,16 @@ function changeRange(value) {
 }
 
 .protocol-chart-toolbar {
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.8rem;
+  gap: 0.65rem;
+  margin-bottom: 0.5rem;
 }
 
-.history-toggle-group {
-  max-width: 100%;
-}
-
-.history-toggle-item {
-  min-width: 4rem;
-  color: var(--muted-foreground);
-  font-size: 0.61rem;
-}
-
-.history-toggle-item[data-state='on'] {
-  border-color: color-mix(in oklab, var(--primary) 38%, var(--border));
-  background: color-mix(in oklab, var(--primary) 10%, var(--card));
-  color: var(--primary);
-}
+/* Segmented-control visuals live in globals.css: reka's ToggleGroupItem does
+   not inherit this component's scope attribute, so scoped rules never hit it. */
 
 .compact-label {
   display: none;
@@ -242,14 +292,11 @@ function changeRange(value) {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.32rem;
+  gap: 0.3rem;
   color: var(--muted-foreground);
-  font-size: 0.58rem;
+  font-size: 0.67rem;
+  line-height: 1.35;
   text-align: right;
-}
-
-.archive-state:has(svg:not(.loading-icon)) {
-  color: color-mix(in oklab, var(--chart-3) 72%, var(--foreground));
 }
 
 .loading-icon {
@@ -257,78 +304,79 @@ function changeRange(value) {
 }
 
 .protocol-legend {
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.55rem;
-  margin-bottom: 0.7rem;
+  gap: 0.45rem 0.9rem;
+  margin-bottom: 0.45rem;
 }
 
-.protocol-legend > span {
-  min-width: min(13rem, 100%);
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 0.12rem 0.42rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 0.58rem;
-  background: color-mix(in oklab, var(--muted) 58%, var(--card));
+.metric {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
 }
 
-.protocol-legend i {
-  grid-row: 1 / 3;
-  width: 0.48rem;
-  height: 0.48rem;
+.series-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  align-self: center;
   border-radius: 50%;
   background: var(--chart-1);
-  box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--chart-1) 12%, transparent);
 }
 
-.protocol-legend .hysteria2-metric i {
-  background: var(--chart-2);
-  box-shadow: 0 0 0 0.18rem color-mix(in oklab, var(--chart-2) 12%, transparent);
+.hysteria2-dot {
+  border: 1px solid var(--chart-2);
+  background: transparent;
 }
 
-.protocol-legend span span {
+.metric-label {
   color: var(--muted-foreground);
-  font-size: 0.53rem;
+  font-size: 0.67rem;
 }
 
-.protocol-legend strong {
+.metric strong {
+  min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 0.68rem;
+  font-size: 0.73rem;
+  font-weight: 650;
+  letter-spacing: -0.006em;
+  font-variant-numeric: tabular-nums;
 }
 
 .protocol-chart-canvas {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  padding-bottom: 1.35rem;
-  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
-  border-radius: 0.68rem;
-  background: color-mix(in oklab, var(--background) 70%, var(--card));
+  padding-bottom: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--border) 64%, transparent);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
 }
 
 .protocol-chart-canvas svg {
   width: 100%;
-  min-height: 12rem;
+  min-height: 11rem;
   display: block;
   overflow: hidden;
+  shape-rendering: geometricPrecision;
 }
 
 .chart-grid {
-  stroke: var(--border);
-  stroke-width: 1;
+  stroke: color-mix(in srgb, var(--border) 78%, transparent);
+  stroke-width: 0.75;
   vector-effect: non-scaling-stroke;
 }
 
 .chart-grid.vertical {
-  opacity: 0.45;
+  stroke-dasharray: 1.5 4.5;
+  opacity: 0.62;
 }
 
 .chart-line {
   fill: none;
-  stroke-width: 2;
+  stroke-width: 1.35;
   stroke-linecap: round;
   stroke-linejoin: round;
   vector-effect: non-scaling-stroke;
@@ -340,22 +388,29 @@ function changeRange(value) {
 
 .hysteria2-line {
   stroke: var(--chart-2);
+  stroke-dasharray: 4 2.75;
 }
 
 .protocol-gap {
-  fill: color-mix(in oklab, var(--chart-3) 42%, transparent);
-  stroke: color-mix(in oklab, var(--chart-3) 65%, transparent);
-  stroke-width: 0.6;
+  fill: url(#protocol-gap-hatch);
+  stroke: color-mix(in srgb, var(--muted-foreground) 34%, transparent);
+  stroke-width: 0.55;
   vector-effect: non-scaling-stroke;
+}
+
+.protocol-gap-hatch-line {
+  stroke: color-mix(in srgb, var(--muted-foreground) 42%, transparent);
+  stroke-width: 0.65;
 }
 
 .protocol-chart-axis {
   position: absolute;
-  inset: auto 0.7rem 0.35rem;
-  height: 0.75rem;
+  inset: auto 0.7rem 0.3rem;
+  height: 0.7rem;
   color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.5rem;
+  font-size: 0.58rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .protocol-chart-axis span {
@@ -373,45 +428,43 @@ function changeRange(value) {
 }
 
 .protocol-chart-empty {
-  min-height: 12rem;
+  min-width: 0;
+  min-height: 11rem;
   display: grid;
-  align-content: center;
-  justify-items: center;
-  padding: 1.2rem;
-  border: 1px dashed var(--border);
-  border-radius: 0.68rem;
-  background: color-mix(in oklab, var(--muted) 38%, var(--card));
-  text-align: center;
+  grid-template-columns: minmax(8.5rem, 0.72fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(0.75rem, 3vw, 1.5rem);
+  padding: 0.8rem clamp(0.8rem, 3vw, 1.25rem);
+  border: 1px dashed color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
 }
 
-.empty-orbit {
-  width: 2.2rem;
-  height: 2.2rem;
-  display: grid;
-  place-items: center;
-  border: 1px solid color-mix(in oklab, var(--primary) 25%, var(--border));
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--primary) 7%, transparent);
+.empty-figure {
+  width: min(100%, 12.5rem);
+  min-height: 0;
+  max-height: 8.5rem;
+  justify-self: end;
+  opacity: 0.72;
+  pointer-events: none;
 }
 
-.empty-orbit i {
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 50%;
-  background: var(--primary);
+.empty-copy {
+  min-width: 0;
 }
 
 .protocol-chart-empty strong {
-  margin-top: 0.65rem;
-  font-size: 0.73rem;
+  display: block;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .protocol-chart-empty p {
-  max-width: 22rem;
-  margin: 0.3rem 0 0;
+  max-width: 25rem;
+  margin: 0.32rem 0 0;
   color: var(--muted-foreground);
-  font-size: 0.6rem;
-  line-height: 1.5;
+  font-size: 0.67rem;
+  line-height: 1.52;
 }
 
 @keyframes rotate {
@@ -424,31 +477,31 @@ function changeRange(value) {
     flex-direction: column;
   }
 
-  .history-toggle-group {
-    width: 100%;
-  }
-
-  .history-toggle-item {
-    min-width: 0;
-    flex: 1;
-  }
-
   .archive-state {
     justify-content: flex-start;
     text-align: left;
   }
 
-  .protocol-legend {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .protocol-legend > span {
-    min-width: 0;
-  }
-
   .protocol-chart-canvas svg {
-    min-height: 9.5rem;
+    min-height: 9.25rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .protocol-chart-empty {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    gap: 0.45rem;
+    padding-block: 0.65rem 0.85rem;
+    text-align: center;
+  }
+
+  .empty-figure {
+    width: min(72%, 10rem);
+    min-height: 0;
+    max-height: 6.5rem;
+    aspect-ratio: 2 / 1;
+    justify-self: center;
   }
 }
 
@@ -462,7 +515,8 @@ function changeRange(value) {
   }
 
   .protocol-legend {
-    grid-template-columns: 1fr;
+    display: grid;
+    gap: 0.3rem;
   }
 }
 

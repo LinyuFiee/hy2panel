@@ -30,7 +30,7 @@ const mockState = {
     result: { timestamp: '2026-11-07T10:00:00Z', server_name: 'San Jose · LibreSpeed', ping: 18.6, jitter: 1.4, download_mbps: 683, upload_mbps: 412, bytes_sent: 200000000, bytes_received: 600000000 }
   },
   node_meta: { country_code: 'US', country_name: 'United States', flag: '🇺🇸', reality_name: '🇺🇸 US-Reality', hysteria2_name: '🇺🇸 US-Hysteria2' },
-  update: { current_version: '0.6.0', latest_version: '0.6.0', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
+  update: { current_version: '0.6.1', latest_version: '0.6.1', release_url: 'https://github.com/LinyuFiee/hy2panel/releases/latest', available: false, checking: false, updating: false }
 }
 
 const mockTraffic = {
@@ -263,8 +263,42 @@ export default defineConfig({
             })
             return
           }
+          if (req.url === '/api/config') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', () => {
+              try {
+                const payload = JSON.parse(body)
+                mockState.config.reality = { ...mockState.config.reality, ...payload.reality }
+                mockState.config.hysteria2 = { ...mockState.config.hysteria2, ...payload.hysteria2 }
+                if (typeof payload.public_host === 'string') mockState.config.public_host = payload.public_host
+              } catch {}
+              res.end(JSON.stringify(mockState))
+            })
+            return
+          }
+          if (req.url === '/api/settings/racknerd') {
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', () => {
+              try {
+                const payload = JSON.parse(body)
+                mockState.racknerd.configured = !payload.clear
+                if (payload.clear) delete mockState.racknerd.info
+              } catch {}
+              res.end(JSON.stringify(mockState))
+            })
+            return
+          }
+          if (req.url === '/api/bbr') {
+            mockState.status.bbr_enabled = true
+            mockState.status.congestion_control = 'bbr'
+            mockState.status.default_qdisc = 'fq'
+            res.end(JSON.stringify(mockState))
+            return
+          }
           if (req.url === '/api/update/check') {
-            mockState.update.latest_version = '0.6.0'
+            mockState.update.latest_version = '0.6.1'
             mockState.update.available = true
             res.end(JSON.stringify(mockState.update))
             return
@@ -276,7 +310,7 @@ export default defineConfig({
             setTimeout(() => {
               mockState.update.updating = false
               mockState.update.available = false
-              mockState.update.current_version = '0.6.0'
+              mockState.update.current_version = '0.6.1'
               mockState.update.message = '更新完成，请刷新页面'
             }, 2000)
             return

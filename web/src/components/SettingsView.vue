@@ -4,23 +4,17 @@ import {
   Check,
   Circle,
   CircleAlert,
-  CloudCog,
   Database,
   Download,
   ExternalLink,
   Gauge,
   KeyRound,
   LoaderCircle,
-  LockKeyhole,
-  Palette,
   RefreshCw,
   RotateCcw,
-  ServerCog,
   ShieldCheck,
-  SlidersHorizontal,
   Trash2,
-  XCircle,
-  Zap
+  XCircle
 } from '@lucide/vue'
 import {
   AlertDialog,
@@ -34,11 +28,6 @@ import {
   AlertDialogTrigger,
   Badge,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Field,
   FieldDescription,
   FieldLabel,
@@ -208,44 +197,34 @@ defineExpose({ clearCredentials })
 </script>
 
 <template>
-  <div class="settings-view">
-    <section class="settings-overview" aria-labelledby="settings-overview-title">
-      <div class="overview-copy">
-        <span class="overview-kicker"><SlidersHorizontal :size="14" /> SYSTEM CONFIGURATION</span>
-        <h2 id="settings-overview-title">版本、网络与访问边界。</h2>
-        <p>高影响操作会先展示影响范围，再由服务器执行固定、可审计的维护流程。</p>
-      </div>
-      <div class="overview-map" aria-label="设置分区">
-        <span><ServerCog :size="15" />核心</span>
-        <span><KeyRound :size="15" />凭据</span>
-        <span><Zap :size="15" />网络</span>
-        <span><Download :size="15" />更新</span>
-        <span><LockKeyhole :size="15" />安全与主题</span>
-      </div>
-    </section>
-
-    <Card class="settings-card singbox-card core-card" data-testid="sing-box-version-card">
-      <div class="core-accent"></div>
-      <CardHeader class="card-header">
-        <div class="heading-group">
-          <div class="heading-icon is-info"><ServerCog :size="21" /></div>
-          <div>
-            <span class="settings-kicker">CORE RUNTIME</span>
-            <CardTitle>sing-box 核心</CardTitle>
-            <CardDescription>仅切换到兼容清单内、具有固定校验值的官方版本。</CardDescription>
-          </div>
+  <div class="settings">
+    <article class="card" data-testid="sing-box-version-card">
+      <header class="card-head">
+        <div class="card-title">
+          <h3>sing-box 核心</h3>
+          <small>仅切换兼容清单内、具有固定校验值的官方版本。</small>
         </div>
         <Badge :variant="operationRunning ? 'warning' : 'success'"><i></i>{{ operationRunning ? '维护中' : '运行可用' }}</Badge>
-      </CardHeader>
+      </header>
 
-      <CardContent class="card-content core-content">
+      <div class="card-body core-body">
         <template v-if="singBox">
-          <div class="version-overview">
-            <div class="version-primary">
-              <span>当前运行版本</span><strong>v{{ singBox.current_version || '未知' }}</strong><small><ShieldCheck :size="13" />受兼容清单保护</small>
+          <div class="version-tiles">
+            <div class="tile">
+              <span>当前运行版本</span>
+              <strong class="tnum">v{{ singBox.current_version || '未知' }}</strong>
+              <small><ShieldCheck :size="12" />受兼容清单保护</small>
             </div>
-            <div><span>上一版本</span><strong>{{ singBox.previous_version ? `v${singBox.previous_version}` : '暂无' }}</strong><small>{{ singBox.can_rollback ? '可用于手动回滚' : '没有回滚快照' }}</small></div>
-            <div class="is-recommended"><span>推荐版本</span><strong>v{{ singBox.recommended_version || '未知' }}</strong><small>维护清单建议</small></div>
+            <div class="tile">
+              <span>上一版本</span>
+              <strong class="tnum">{{ singBox.previous_version ? `v${singBox.previous_version}` : '暂无' }}</strong>
+              <small>{{ singBox.can_rollback ? '可用于手动回滚' : '没有回滚快照' }}</small>
+            </div>
+            <div class="tile">
+              <span>推荐版本</span>
+              <strong class="tnum">v{{ singBox.recommended_version || '未知' }}</strong>
+              <small>维护清单建议</small>
+            </div>
           </div>
 
           <div class="version-workbench">
@@ -265,16 +244,20 @@ defineExpose({ clearCredentials })
               <p id="version-help" class="control-reason">{{ switchDisabledReason || '切换会重启 sing-box；健康检查失败时服务器自动恢复上一版本。' }}</p>
             </div>
             <div class="release-meta">
-              <div><span>官方资产</span><strong>{{ selectedRelease?.asset_name || '正在读取兼容版本…' }}</strong><small v-if="selectedRelease">{{ formatBytes(selectedRelease.size) }} · SHA-256 固定校验</small></div>
+              <div>
+                <span>官方资产</span>
+                <strong>{{ selectedRelease?.asset_name || '正在读取兼容版本…' }}</strong>
+                <small v-if="selectedRelease" class="tnum">{{ formatBytes(selectedRelease.size) }} · SHA-256 固定校验</small>
+              </div>
               <a v-if="selectedRelease?.release_url" :href="selectedRelease.release_url" target="_blank" rel="noopener noreferrer">Release <ExternalLink :size="13" /></a>
             </div>
           </div>
 
-          <div class="core-actions">
+          <div class="action-row">
             <AlertDialog>
               <AlertDialogTrigger as-child>
-                <Button class="primary-action" :disabled="Boolean(switchDisabledReason)">
-                  <RefreshCw :size="16" :class="{ spin: operationRunning && operation.action === 'switch' }" />
+                <Button :disabled="Boolean(switchDisabledReason)">
+                  <RefreshCw :size="15" :class="{ spin: operationRunning && operation.action === 'switch' }" />
                   {{ operationRunning && operation.action === 'switch' ? '正在切换…' : '切换核心' }}
                 </Button>
               </AlertDialogTrigger>
@@ -293,7 +276,7 @@ defineExpose({ clearCredentials })
             <AlertDialog>
               <AlertDialogTrigger as-child>
                 <Button variant="outline" :disabled="Boolean(rollbackDisabledReason)">
-                  <RotateCcw :size="16" :class="{ spin: operationRunning && operation.action === 'rollback' }" />
+                  <RotateCcw :size="15" :class="{ spin: operationRunning && operation.action === 'rollback' }" />
                   {{ operationRunning && operation.action === 'rollback' ? '正在回滚…' : '回滚上一版本' }}
                 </Button>
               </AlertDialogTrigger>
@@ -342,20 +325,20 @@ defineExpose({ clearCredentials })
           <strong>{{ singBoxLoading ? '正在读取核心版本' : '核心版本信息暂不可用' }}</strong>
           <span>{{ singBoxLoading ? '正在同步兼容清单与最近任务。' : '稍后重新进入此页面以重试。' }}</span>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </article>
 
-    <div class="settings-pair-grid">
-      <Card class="settings-card credential-card">
-        <CardHeader class="card-header compact-header">
-          <div class="heading-group">
-            <div class="heading-icon is-primary"><CloudCog :size="20" /></div>
-            <div><span class="settings-kicker">BANDWIDTH SOURCE</span><CardTitle>RackNerd 官方流量</CardTitle><CardDescription>凭据仅用于只读 info 请求，不提供关机或重启能力。</CardDescription></div>
+    <div class="pair-grid">
+      <article class="card">
+        <header class="card-head">
+          <div class="card-title">
+            <h3>RackNerd 官方流量</h3>
+            <small>凭据仅用于只读 info 请求，不提供关机或重启能力。</small>
           </div>
           <Badge v-if="state.racknerd?.configured" variant="success"><ShieldCheck :size="13" />已配置</Badge>
           <Badge v-else variant="outline">未配置</Badge>
-        </CardHeader>
-        <CardContent class="card-content section-content">
+        </header>
+        <div class="card-body stack">
           <form class="credential-form" @submit.prevent="saveRackNerd">
             <div class="credential-fields">
               <Field>
@@ -369,9 +352,9 @@ defineExpose({ clearCredentials })
             </div>
             <FieldDescription class="field-help">凭据仅保存在 VPS 的 600 权限配置中，状态 API 不会回显；已配置时留空字段会保留原值。</FieldDescription>
             <div class="action-row">
-              <Button type="submit" class="primary-action" :disabled="busy.racknerd"><KeyRound :size="16" />{{ busy.racknerd ? '正在验证…' : '保存并获取流量' }}</Button>
+              <Button type="submit" :disabled="busy.racknerd"><KeyRound :size="15" />{{ busy.racknerd ? '正在验证…' : '保存并获取流量' }}</Button>
               <AlertDialog v-if="state.racknerd?.configured">
-                <AlertDialogTrigger as-child><Button type="button" variant="outline" class="danger-outline" :disabled="busy.racknerd"><Trash2 :size="16" />清除凭据</Button></AlertDialogTrigger>
+                <AlertDialogTrigger as-child><Button type="button" variant="outline" class="danger-outline" :disabled="busy.racknerd"><Trash2 :size="15" />清除凭据</Button></AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader><AlertDialogTitle>清除 RackNerd 凭据？</AlertDialogTitle><AlertDialogDescription>清除后面板将停止拉取官方套餐流量；节点和代理服务不会受到影响。需要再次显示套餐流量时必须重新输入 Key 与 Hash。</AlertDialogDescription></AlertDialogHeader>
                   <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction class="destructive-dialog-action" @click="emit('clear-racknerd')">确认清除</AlertDialogAction></AlertDialogFooter>
@@ -380,50 +363,53 @@ defineExpose({ clearCredentials })
             </div>
           </form>
           <p v-if="state.racknerd?.error" class="error-message" role="status">{{ state.racknerd.error }}</p>
-        </CardContent>
-      </Card>
+        </div>
+      </article>
 
-      <Card class="settings-card bbr-card">
-        <CardHeader class="card-header compact-header">
-          <div class="heading-group">
-            <div class="heading-icon is-violet"><Zap :size="20" /></div>
-            <div><span class="settings-kicker">NETWORK TUNING</span><CardTitle>BBR 网络优化</CardTitle><CardDescription>应用项目内置的 BBR + fq 保守模板，不接受浏览器任意命令。</CardDescription></div>
+      <article class="card">
+        <header class="card-head">
+          <div class="card-title">
+            <h3>BBR 网络优化</h3>
+            <small>应用项目内置的 BBR + fq 保守模板，不接受浏览器任意命令。</small>
           </div>
           <Badge :variant="state.status.bbr_enabled ? 'success' : 'warning'">{{ state.status.bbr_enabled ? '已启用' : '待处理' }}</Badge>
-        </CardHeader>
-        <CardContent class="card-content section-content">
-          <div class="readout-grid"><div><span>拥塞控制</span><strong>{{ state.status.congestion_control || '未知' }}</strong></div><div><span>队列规则</span><strong>{{ state.status.default_qdisc || '未知' }}</strong></div></div>
-          <div class="network-note"><Gauge :size="16" /><p>BBR 主要优化 TCP；Hysteria2 使用 QUIC 自有拥塞控制，不会被 BBR 直接加速。</p></div>
+        </header>
+        <div class="card-body stack">
+          <div class="readout-grid">
+            <div><span>拥塞控制</span><strong>{{ state.status.congestion_control || '未知' }}</strong></div>
+            <div><span>队列规则</span><strong>{{ state.status.default_qdisc || '未知' }}</strong></div>
+          </div>
+          <p class="network-note"><Gauge :size="14" /><span>BBR 主要优化 TCP；Hysteria2 使用 QUIC 自有拥塞控制，不会被 BBR 直接加速。</span></p>
           <AlertDialog>
-            <AlertDialogTrigger as-child><Button variant="outline" class="fit-action" :disabled="busy.bbr || Boolean(bbrDisabledReason)"><RotateCcw :size="16" :class="{ spin: busy.bbr }" />{{ busy.bbr ? '正在应用…' : '应用 BBR + fq' }}</Button></AlertDialogTrigger>
+            <AlertDialogTrigger as-child><Button variant="outline" class="fit-action" :disabled="busy.bbr || Boolean(bbrDisabledReason)"><RotateCcw :size="15" :class="{ spin: busy.bbr }" />{{ busy.bbr ? '正在应用…' : '应用 BBR + fq' }}</Button></AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader><AlertDialogTitle>应用 BBR + fq 模板？</AlertDialogTitle><AlertDialogDescription>系统将写入项目固定的内核网络参数并立即加载。此操作不会执行浏览器提供的命令，也不会修改节点协议配置。</AlertDialogDescription></AlertDialogHeader>
               <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction @click="emit('apply-bbr')">确认应用</AlertDialogAction></AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
           <p v-if="bbrDisabledReason" class="disabled-reason">当前不可用：{{ bbrDisabledReason }}</p>
-        </CardContent>
-      </Card>
+        </div>
+      </article>
     </div>
 
-    <Card class="settings-card update-card">
-      <CardHeader class="card-header compact-header">
-        <div class="heading-group">
-          <div class="heading-icon is-success"><Download :size="20" /></div>
-          <div><span class="settings-kicker">PANEL RELEASE</span><CardTitle>面板更新</CardTitle><CardDescription>从 hy2panel 官方 Release 检测，并在安装前强制校验 SHA-256。</CardDescription></div>
+    <article class="card">
+      <header class="card-head">
+        <div class="card-title">
+          <h3>面板更新</h3>
+          <small>从官方 Release 检测，安装前强制校验 SHA-256。</small>
         </div>
         <Badge v-if="state.update?.available" variant="success">发现新版本</Badge><Badge v-else variant="outline">{{ updateChecking ? '检测中' : '稳定' }}</Badge>
-      </CardHeader>
-      <CardContent class="card-content section-content">
+      </header>
+      <div class="card-body stack">
         <div class="update-summary">
-          <div><span>当前版本</span><strong>v{{ state.update?.current_version || '未知' }}</strong></div>
-          <div><span>最新版本</span><strong>{{ state.update?.latest_version ? `v${state.update.latest_version}` : '尚未检测' }}</strong></div>
+          <div><span>当前版本</span><strong class="tnum">v{{ state.update?.current_version || '未知' }}</strong></div>
+          <div><span>最新版本</span><strong class="tnum">{{ state.update?.latest_version ? `v${state.update.latest_version}` : '尚未检测' }}</strong></div>
           <div class="operation-readout"><span>操作状态</span><strong>{{ updateStatusText }}</strong></div>
         </div>
         <div class="action-row">
-          <Button variant="outline" :disabled="updateChecking || updateRunning" @click="emit('check-update')"><RefreshCw :size="16" :class="{ spin: updateChecking }" />{{ updateChecking ? '正在检测…' : '检测更新' }}</Button>
+          <Button variant="outline" :disabled="updateChecking || updateRunning" @click="emit('check-update')"><RefreshCw :size="15" :class="{ spin: updateChecking }" />{{ updateChecking ? '正在检测…' : '检测更新' }}</Button>
           <AlertDialog v-if="state.update?.available">
-            <AlertDialogTrigger as-child><Button class="primary-action" :disabled="updateRunning || Boolean(updateDisabledReason)"><Download :size="16" />{{ updateRunning ? '正在更新…' : '立即更新' }}</Button></AlertDialogTrigger>
+            <AlertDialogTrigger as-child><Button :disabled="updateRunning || Boolean(updateDisabledReason)"><Download :size="15" />{{ updateRunning ? '正在更新…' : '立即更新' }}</Button></AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader><AlertDialogTitle>更新面板到 v{{ state.update.latest_version }}？</AlertDialogTitle><AlertDialogDescription>面板会短暂重启，但节点配置会保留。服务器将在安装前校验升级包，失败时自动尝试回滚到当前版本。</AlertDialogDescription></AlertDialogHeader>
               <AlertDialogFooter><AlertDialogCancel>取消</AlertDialogCancel><AlertDialogAction @click="emit('apply-update')">确认更新</AlertDialogAction></AlertDialogFooter>
@@ -436,20 +422,19 @@ defineExpose({ clearCredentials })
         <p v-if="state.update?.message" class="success-message" role="status"><ShieldCheck :size="14" />{{ state.update.message }}</p>
         <p v-if="state.update?.error" class="error-message" role="status">{{ state.update.error }}</p>
         <p class="field-help">更新不会覆盖节点配置；切换期间控制面板可能短暂无法访问。</p>
-      </CardContent>
-    </Card>
+      </div>
+    </article>
 
-    <Card class="settings-card security-card">
-      <CardHeader class="card-header compact-header">
-        <div class="heading-group">
-          <div class="heading-icon is-warning"><LockKeyhole :size="20" /></div>
-          <div><span class="settings-kicker">SECURITY & APPEARANCE</span><CardTitle>安全与主题</CardTitle><CardDescription>确认当前访问边界，并选择仅保存在本机浏览器的外观偏好。</CardDescription></div>
+    <article class="card">
+      <header class="card-head">
+        <div class="card-title">
+          <h3>安全与外观</h3>
+          <small>服务器强制执行的访问边界，与仅保存在本机浏览器的外观偏好。</small>
         </div>
-      </CardHeader>
-      <CardContent class="card-content section-content">
+      </header>
+      <div class="card-body">
         <div class="safety-layout">
-          <section class="security-section" aria-labelledby="security-title">
-            <div class="subheading"><ShieldCheck :size="17" /><div><strong id="security-title">访问安全</strong><span>服务器强制执行</span></div></div>
+          <section aria-label="访问安全">
             <ul class="security-list">
               <li><ShieldCheck :size="15" /><span>公网入口<strong>仅通过 HTTPS 访问</strong></span></li>
               <li><ShieldCheck :size="15" /><span>登录防护<strong>按来源限制登录尝试速率</strong></span></li>
@@ -457,238 +442,851 @@ defineExpose({ clearCredentials })
               <li><Database :size="15" /><span>敏感配置<strong>仅 root / hy2panel 可读取</strong></span></li>
             </ul>
           </section>
-          <section class="theme-section" aria-labelledby="theme-title">
-            <div class="subheading"><Palette :size="17" /><div><strong id="theme-title">外观主题</strong><span>仅影响当前浏览器</span></div></div>
-            <div class="theme-panel"><ThemeToggle label="界面颜色" /><p>跟随系统会根据设备偏好自动选择浅色或深色，不会同步到服务器。</p></div>
+          <section aria-label="外观主题" class="theme-section">
+            <ThemeToggle label="界面主题" />
+            <p class="theme-note">跟随系统会根据设备偏好自动选择浅色或深色，不会同步到服务器。</p>
           </section>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </article>
 
     <p v-if="maintenanceLocked" class="maintenance-lock-note" role="status">当前有维护任务执行中；相互冲突的版本、网络或面板操作会保持禁用，直至任务完成。</p>
   </div>
 </template>
 
 <style scoped>
-.settings-view {
-  --s-card: var(--card, #fff);
-  --s-text: var(--foreground, #263a33);
-  --s-text-soft: color-mix(in srgb, var(--foreground, #263a33) 82%, transparent);
-  --s-muted: var(--muted-foreground, #71827a);
-  --s-border: var(--border, #e1e9e4);
-  --s-border-soft: color-mix(in srgb, var(--border, #e1e9e4) 72%, transparent);
-  --s-surface: color-mix(in srgb, var(--muted, #f1f5f2) 72%, var(--card, #fff));
-  --s-primary: #4f8f79;
-  --s-primary-strong: #39745f;
-  --s-primary-soft: color-mix(in srgb, #69a58e 15%, var(--card, #fff));
-  --s-success: #478266;
-  --s-success-soft: color-mix(in srgb, #62a17e 14%, var(--card, #fff));
-  --s-warning: #a0793c;
-  --s-warning-soft: color-mix(in srgb, #d8b66f 15%, var(--card, #fff));
-  --s-danger: #b85f62;
-  --s-danger-soft: color-mix(in srgb, #cc7477 13%, var(--card, #fff));
-  --s-info: #688da1;
-  --s-info-soft: color-mix(in srgb, #77a7bd 14%, var(--card, #fff));
-  --s-violet: #7e76aa;
-  --s-violet-soft: color-mix(in srgb, #9389c1 14%, var(--card, #fff));
+.settings {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
   width: 100%;
   min-width: 0;
 }
 
-.settings-overview {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(21rem, 0.75fr);
-  align-items: center;
-  gap: 1.5rem;
+.card {
   min-width: 0;
-  padding: 1.3rem 1.5rem;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--s-primary) 16%, var(--s-border));
-  border-radius: 1rem;
-  background: radial-gradient(circle at 96% 15%, color-mix(in srgb, var(--s-info) 11%, transparent), transparent 15rem), linear-gradient(135deg, var(--s-primary-soft), var(--s-card) 58%);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: var(--card);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent);
 }
-.settings-overview::after { content: ''; position: absolute; right: -3rem; bottom: -4rem; width: 12rem; height: 12rem; border: 1px solid color-mix(in srgb, var(--s-info) 13%, transparent); border-radius: 50%; pointer-events: none; }
-.overview-copy, .overview-map { position: relative; z-index: 1; min-width: 0; }
-.overview-kicker, .settings-kicker { color: var(--s-primary); font-size: 0.62rem; font-weight: 760; letter-spacing: 0.13em; }
-.overview-kicker { display: inline-flex; align-items: center; gap: 0.4rem; }
-.settings-kicker { display: block; margin-bottom: 0.38rem; }
-.overview-copy h2 { margin: 0.55rem 0 0.5rem; color: var(--s-text); font-size: clamp(1.25rem, 2.2vw, 1.65rem); line-height: 1.25; }
-.overview-copy p { max-width: 39rem; margin: 0; color: var(--s-muted); font-size: 0.74rem; line-height: 1.65; }
-.overview-map { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.45rem; }
-.overview-map span { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.5rem 0.65rem; border: 1px solid var(--s-border-soft); border-radius: 999px; background: color-mix(in srgb, var(--s-card) 84%, transparent); color: var(--s-text-soft); font-size: 0.61rem; font-weight: 650; white-space: nowrap; }
-.overview-map svg { color: var(--s-primary); }
 
-.settings-card { min-width: 0; gap: 0; padding-block: 0; overflow: hidden; border-color: var(--s-border); background: var(--s-card); box-shadow: 0 0.45rem 1.7rem color-mix(in srgb, var(--s-text) 5%, transparent); }
-.card-header { display: flex; grid-template-columns: none; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.3rem 1.4rem 1rem; }
-.card-content { padding: 0 1.4rem 1.3rem; }
-.heading-group { display: flex; align-items: flex-start; gap: 0.78rem; min-width: 0; }
-.heading-icon { display: grid; place-items: center; width: 2.45rem; height: 2.45rem; flex: 0 0 auto; border-radius: 0.76rem; }
-.heading-icon.is-info { background: var(--s-info-soft); color: var(--s-info); }
-.heading-icon.is-primary { background: var(--s-primary-soft); color: var(--s-primary); }
-.heading-icon.is-violet { background: var(--s-violet-soft); color: var(--s-violet); }
-.heading-icon.is-success { background: var(--s-success-soft); color: var(--s-success); }
-.heading-icon.is-warning { background: var(--s-warning-soft); color: var(--s-warning); }
-:deep([data-slot='card-title']) { margin: 0; color: var(--s-text); font-size: 1rem; line-height: 1.3; }
-:deep([data-slot='card-description']) { margin: 0.35rem 0 0; color: var(--s-muted); font-size: 0.69rem; line-height: 1.55; }
-.card-header > :deep([data-slot='badge']) { flex: 0 0 auto; font-size: 0.59rem; }
-.card-header > :deep([data-slot='badge']) i { width: 0.38rem; height: 0.38rem; border-radius: 50%; background: currentColor; }
-.core-accent { height: 0.22rem; background: linear-gradient(90deg, var(--s-info), var(--s-primary)); }
-.core-content { display: grid; gap: 1rem; }
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.78rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
 
-.version-overview { display: grid; grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 0.8fr)); gap: 0.65rem; }
-.version-overview > div { min-width: 0; padding: 0.9rem; border: 1px solid var(--s-border-soft); border-radius: 0.8rem; background: var(--s-surface); }
-.version-overview .version-primary { background: linear-gradient(135deg, var(--s-info-soft), var(--s-card)); }
-.version-overview .is-recommended { background: linear-gradient(135deg, var(--s-primary-soft), var(--s-card)); }
-.version-overview span, .version-overview small { display: block; color: var(--s-muted); font-size: 0.59rem; }
-.version-overview strong { display: block; margin: 0.32rem 0; color: var(--s-text); font-size: 1.05rem; overflow-wrap: anywhere; }
-.version-primary strong { font-size: 1.35rem; }
-.version-primary small { display: flex; align-items: center; gap: 0.3rem; color: var(--s-success); }
-.version-workbench { display: grid; grid-template-columns: minmax(14rem, 0.9fr) minmax(0, 1.1fr); align-items: start; gap: 0.8rem; padding: 0.95rem; border: 1px solid var(--s-border-soft); border-radius: 0.85rem; }
-.version-field { min-width: 0; }
-.version-field label { display: block; margin: 0 0 0.42rem; color: var(--s-text-soft); font-size: 0.67rem; font-weight: 680; }
-.version-field :deep([data-slot='native-select-wrapper']) { width: 100%; }
-.version-select { min-height: 2.45rem; color: var(--s-text); }
-.control-reason, .disabled-reason { margin: 0.42rem 0 0; color: var(--s-muted); font-size: 0.61rem; line-height: 1.5; }
-.disabled-reason { color: var(--s-warning); }
-.release-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; min-width: 0; padding: 0.72rem 0.8rem; border-radius: 0.72rem; background: var(--s-surface); }
-.release-meta > div { display: grid; gap: 0.18rem; min-width: 0; }
-.release-meta span, .release-meta small { color: var(--s-muted); font-size: 0.57rem; }
-.release-meta strong { min-width: 0; color: var(--s-text-soft); font-size: 0.67rem; overflow-wrap: anywhere; }
-.release-meta a { display: inline-flex; align-items: center; gap: 0.3rem; flex: 0 0 auto; color: var(--s-primary); font-size: 0.63rem; font-weight: 680; text-decoration: none; }
-.release-meta a:hover { text-decoration: underline; }
-.core-actions, .action-row { display: flex; flex-wrap: wrap; gap: 0.55rem; }
-.core-actions :deep(button), .action-row :deep(button), .action-row :deep(a) { min-height: 2.3rem; border-radius: 0.66rem; }
-.primary-action { background: var(--s-primary); color: white; }
-.primary-action:hover { background: var(--s-primary-strong); }
-.danger-outline { color: var(--s-danger); }
-.destructive-dialog-action { background: var(--destructive); color: var(--destructive-foreground); }
+.card-title {
+  min-width: 0;
+  display: grid;
+  gap: 0.15rem;
+}
 
-.operation-timeline { display: grid; gap: 0.85rem; padding: 1rem; border: 1px solid var(--s-border-soft); border-radius: 0.85rem; background: var(--s-surface); }
-.operation-timeline[data-tone='success'] { border-color: color-mix(in srgb, var(--s-success) 24%, var(--s-border)); background: var(--s-success-soft); }
-.operation-timeline[data-tone='rollback'] { border-color: color-mix(in srgb, var(--s-warning) 28%, var(--s-border)); background: var(--s-warning-soft); }
-.operation-timeline[data-tone='danger'] { border-color: color-mix(in srgb, var(--s-danger) 28%, var(--s-border)); background: var(--s-danger-soft); }
-.timeline-header, .timeline-state { display: flex; align-items: center; }
-.timeline-header { justify-content: space-between; gap: 0.8rem; }
-.timeline-state { gap: 0.55rem; min-width: 0; color: var(--s-primary); }
-[data-tone='success'] .timeline-state { color: var(--s-success); }
-[data-tone='rollback'] .timeline-state { color: var(--s-warning); }
-[data-tone='danger'] .timeline-state { color: var(--s-danger); }
-.timeline-state > div { display: grid; gap: 0.12rem; min-width: 0; }
-.timeline-state span { color: var(--s-muted); font-size: 0.58rem; }
-.timeline-state strong { color: var(--s-text); font-size: 0.72rem; }
-.timeline-header :deep([data-slot='badge']) { flex: 0 0 auto; border-color: var(--s-border); color: var(--s-muted); font-size: 0.57rem; }
-.timeline-track { position: relative; min-width: 0; padding-top: 0.15rem; }
-.timeline-progress { height: 0.18rem; background: color-mix(in srgb, var(--s-border) 80%, transparent); }
-.timeline-progress :deep(div) { background: var(--s-primary); }
-[data-tone='success'] .timeline-progress :deep(div) { background: var(--s-success); }
-[data-tone='rollback'] .timeline-progress :deep(div) { background: var(--s-warning); }
-[data-tone='danger'] .timeline-progress :deep(div) { background: var(--s-danger); }
-.timeline-track ol { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0.4rem; margin: 0.5rem 0 0; padding: 0; list-style: none; }
-.timeline-track ol.has-rollback { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-.timeline-track li { display: grid; justify-items: center; gap: 0.35rem; min-width: 0; color: var(--s-muted); font-size: 0.55rem; text-align: center; }
-.timeline-track li > span { display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border: 1px solid var(--s-border); border-radius: 50%; background: var(--s-card); color: var(--s-muted); }
-.timeline-track li em { font-style: normal; }
-.timeline-track li[data-state='done'] > span, .timeline-track li[data-state='rollback-success'] > span { border-color: var(--s-success); background: var(--s-success); color: white; }
-.timeline-track li[data-state='active'] > span { border-color: var(--s-primary); background: var(--s-primary-soft); color: var(--s-primary); }
-.timeline-track li[data-state='failed'] > span { border-color: var(--s-danger); background: var(--s-danger-soft); color: var(--s-danger); }
-.timeline-track li[data-state='done'], .timeline-track li[data-state='rollback-success'] { color: var(--s-text-soft); }
-.timeline-track li[data-state='active'] { color: var(--s-primary); font-weight: 700; }
-.timeline-track li[data-state='failed'] { color: var(--s-danger); }
-.timeline-message { display: flex; align-items: flex-start; gap: 0.45rem; color: var(--s-primary); }
-[data-tone='success'] .timeline-message { color: var(--s-success); }
-[data-tone='rollback'] .timeline-message { color: var(--s-warning); }
-[data-tone='danger'] .timeline-message { color: var(--s-danger); }
-.timeline-message svg { flex: 0 0 auto; margin-top: 0.05rem; }
-.timeline-message p { margin: 0; color: var(--s-text-soft); font-size: 0.64rem; line-height: 1.55; overflow-wrap: anywhere; }
-.core-empty { display: grid; justify-items: center; gap: 0.38rem; min-height: 10rem; place-content: center; color: var(--s-muted); text-align: center; }
-.core-empty strong { color: var(--s-text); font-size: 0.78rem; }
-.core-empty span { font-size: 0.65rem; }
+.card-title h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
 
-.settings-pair-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 1rem; min-width: 0; }
-.settings-pair-grid > * { min-width: 0; }
-.compact-header { padding: 1.2rem 1.25rem 0.9rem; }
-.section-content { display: grid; gap: 0.8rem; padding: 0 1.25rem 1.2rem; }
-.credential-form { display: grid; gap: 0.8rem; }
-.credential-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
-.credential-fields :deep([data-slot='field-label']) { color: var(--s-text-soft); font-size: 0.65rem; }
-.credential-fields :deep(input) { min-height: 2.35rem; color: var(--s-text); }
-.field-help { margin: 0; color: var(--s-muted); font-size: 0.61rem; line-height: 1.55; }
-.readout-grid, .update-summary { display: grid; gap: 0.6rem; }
-.readout-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.update-summary { grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr); }
-.readout-grid > div, .update-summary > div { min-width: 0; padding: 0.78rem; border: 1px solid var(--s-border-soft); border-radius: 0.7rem; background: var(--s-surface); }
-.readout-grid span, .update-summary span { display: block; color: var(--s-muted); font-size: 0.57rem; }
-.readout-grid strong, .update-summary strong { display: block; margin-top: 0.25rem; color: var(--s-text); font-size: 0.8rem; overflow-wrap: anywhere; }
-.operation-readout strong { color: var(--s-primary); }
-.network-note { display: flex; align-items: flex-start; gap: 0.48rem; padding: 0.7rem; border-radius: 0.68rem; background: var(--s-violet-soft); color: var(--s-violet); }
-.network-note svg { flex: 0 0 auto; margin-top: 0.05rem; }
-.network-note p { margin: 0; color: var(--s-text-soft); font-size: 0.61rem; line-height: 1.55; }
-.fit-action { width: fit-content; min-height: 2.3rem; border-radius: 0.66rem; }
-.error-message { margin: 0; padding: 0.7rem; border-radius: 0.65rem; background: var(--s-danger-soft); color: var(--s-danger); font-size: 0.62rem; line-height: 1.5; }
-.success-message { display: flex; align-items: flex-start; gap: 0.4rem; margin: 0; color: var(--s-success); font-size: 0.61rem; line-height: 1.55; }
-.success-message svg { flex: 0 0 auto; margin-top: 0.05rem; }
+.card-title small {
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
 
-.safety-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 0.65fr); gap: 0.8rem; }
-.security-section, .theme-section { min-width: 0; padding: 0.9rem; border: 1px solid var(--s-border-soft); border-radius: 0.8rem; background: var(--s-surface); }
-.subheading { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; color: var(--s-primary); }
-.subheading > div { display: grid; gap: 0.12rem; min-width: 0; }
-.subheading strong { color: var(--s-text); font-size: 0.71rem; }
-.subheading span { color: var(--s-muted); font-size: 0.55rem; }
-.security-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
-.security-list li { display: flex; align-items: flex-start; gap: 0.45rem; min-width: 0; padding: 0.65rem; border-radius: 0.65rem; background: var(--s-card); color: var(--s-success); }
-.security-list li > svg { flex: 0 0 auto; margin-top: 0.05rem; }
-.security-list span { min-width: 0; color: var(--s-muted); font-size: 0.56rem; }
-.security-list strong { display: block; margin-top: 0.18rem; color: var(--s-text-soft); font-size: 0.63rem; line-height: 1.45; overflow-wrap: anywhere; }
-.theme-panel { display: grid; gap: 0.75rem; padding: 0.75rem; border-radius: 0.68rem; background: var(--s-card); }
-.theme-panel :deep(.theme-toggle-label) { color: var(--s-text-soft); }
-.theme-panel p { margin: 0; color: var(--s-muted); font-size: 0.59rem; line-height: 1.55; }
-.maintenance-lock-note { margin: -0.2rem 0 0; padding: 0.75rem 0.9rem; border: 1px solid color-mix(in srgb, var(--s-warning) 24%, var(--s-border)); border-radius: 0.7rem; background: var(--s-warning-soft); color: var(--s-warning); font-size: 0.62rem; line-height: 1.5; }
-.spin { animation: settings-spin 0.9s linear infinite; }
-@keyframes settings-spin { to { transform: rotate(360deg); } }
+.card-head > [data-slot='badge'] {
+  flex: 0 0 auto;
+}
+
+.card-head > [data-slot='badge'] i {
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.card-body {
+  padding: 0.8rem 1rem 0.9rem;
+}
+
+.stack {
+  display: grid;
+  gap: 0.8rem;
+}
+
+/* ---------- core ---------- */
+
+.core-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.version-tiles {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 0.8fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.tile {
+  min-width: 0;
+  padding: 0.68rem 0.75rem;
+  background: color-mix(in srgb, var(--muted) 48%, var(--card));
+}
+
+.tile + .tile {
+  border-left: 1px solid var(--border);
+}
+
+.tile span,
+.tile small {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.tile small {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.tile strong {
+  display: block;
+  margin: 0.22rem 0;
+  color: var(--foreground);
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.version-workbench {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.9fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 0.7rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--muted) 25%, var(--card));
+}
+
+.version-field {
+  min-width: 0;
+}
+
+.version-field > label {
+  display: block;
+  margin: 0 0 0.4rem;
+  color: var(--foreground);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.version-field :deep([data-slot='native-select-wrapper']) {
+  width: 100%;
+}
+
+.version-select {
+  min-height: 2.5rem;
+  border-radius: 0.6rem;
+  color: var(--foreground);
+}
+
+.control-reason,
+.disabled-reason {
+  margin: 0.4rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.disabled-reason {
+  color: var(--warning);
+}
+
+.release-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.62rem 0.7rem;
+  border-left: 1px solid var(--border);
+}
+
+.release-meta > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.release-meta span,
+.release-meta small {
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+}
+
+.release-meta strong {
+  min-width: 0;
+  color: var(--foreground);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.release-meta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.release-meta a:hover {
+  text-decoration: underline;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.danger-outline {
+  color: var(--destructive);
+}
+
+.destructive-dialog-action {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+/* ---------- timeline ---------- */
+
+.operation-timeline {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--muted) 52%, var(--card));
+}
+
+.operation-timeline[data-tone='success'] {
+  background: color-mix(in srgb, var(--success) 8%, var(--card));
+}
+
+.operation-timeline[data-tone='rollback'] {
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
+}
+
+.operation-timeline[data-tone='danger'] {
+  background: color-mix(in srgb, var(--destructive) 8%, var(--card));
+}
+
+.timeline-header,
+.timeline-state {
+  display: flex;
+  align-items: center;
+}
+
+.timeline-header {
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.timeline-state {
+  gap: 0.55rem;
+  min-width: 0;
+  color: var(--primary);
+}
+
+[data-tone='success'] .timeline-state {
+  color: var(--success);
+}
+
+[data-tone='rollback'] .timeline-state {
+  color: var(--warning);
+}
+
+[data-tone='danger'] .timeline-state {
+  color: var(--destructive);
+}
+
+.timeline-state > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.timeline-state span {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.timeline-state strong {
+  color: var(--foreground);
+  font-size: 0.82rem;
+}
+
+.timeline-track {
+  position: relative;
+  min-width: 0;
+  padding-top: 0.15rem;
+}
+
+.timeline-progress {
+  height: 0.2rem;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.timeline-track ol {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.2rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-track ol.has-rollback {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.timeline-track li {
+  display: grid;
+  justify-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 0.64rem;
+  text-align: center;
+}
+
+.timeline-track li > span {
+  display: grid;
+  place-items: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--muted-foreground);
+}
+
+.timeline-track li em {
+  font-style: normal;
+}
+
+.timeline-track li[data-state='done'] > span,
+.timeline-track li[data-state='rollback-success'] > span {
+  border-color: var(--success);
+  background: var(--success);
+  color: #fff;
+}
+
+.timeline-track li[data-state='active'] > span {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  color: var(--primary);
+}
+
+.timeline-track li[data-state='failed'] > span {
+  border-color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.timeline-track li[data-state='done'],
+.timeline-track li[data-state='rollback-success'] {
+  color: var(--foreground);
+}
+
+.timeline-track li[data-state='active'] {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.timeline-track li[data-state='failed'] {
+  color: var(--destructive);
+}
+
+.timeline-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  color: var(--primary);
+}
+
+[data-tone='success'] .timeline-message {
+  color: var(--success);
+}
+
+[data-tone='rollback'] .timeline-message {
+  color: var(--warning);
+}
+
+[data-tone='danger'] .timeline-message {
+  color: var(--destructive);
+}
+
+.timeline-message svg {
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+}
+
+.timeline-message p {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 0.74rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.core-empty {
+  display: grid;
+  justify-items: center;
+  gap: 0.38rem;
+  min-height: 9rem;
+  place-content: center;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.core-empty strong {
+  color: var(--foreground);
+  font-size: 0.85rem;
+}
+
+.core-empty span {
+  font-size: 0.72rem;
+}
+
+/* ---------- pair cards ---------- */
+
+.pair-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.credential-form {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.credential-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--muted) 25%, var(--card));
+}
+
+.credential-fields :deep([data-slot='field-label']) {
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.credential-fields :deep(input) {
+  min-height: 2.5rem;
+  border-radius: 0.6rem;
+  color: var(--foreground);
+}
+
+.field-help {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.readout-grid,
+.update-summary {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.readout-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.update-summary {
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 0.8fr) minmax(0, 1.4fr);
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.readout-grid > div,
+.update-summary > div {
+  min-width: 0;
+  padding: 0.62rem 0.7rem;
+  background: color-mix(in srgb, var(--muted) 48%, var(--card));
+}
+
+.readout-grid > div + div,
+.update-summary > div + div {
+  border-left: 1px solid var(--border);
+}
+
+.readout-grid span,
+.update-summary span {
+  display: block;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.readout-grid strong,
+.update-summary strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--foreground);
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.operation-readout strong {
+  color: var(--primary);
+}
+
+.network-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.48rem;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  line-height: 1.55;
+}
+
+.network-note svg {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  color: var(--primary);
+}
+
+.fit-action {
+  width: fit-content;
+}
+
+.error-message {
+  margin: 0;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--destructive) 9%, transparent);
+  color: var(--destructive);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.success-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  color: var(--success);
+  font-size: 0.74rem;
+  line-height: 1.55;
+}
+
+.success-message svg {
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+}
+
+/* ---------- security & theme ---------- */
+
+.safety-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(15rem, 0.6fr);
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+}
+
+.security-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.security-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.65rem 0.7rem;
+  background: color-mix(in srgb, var(--muted) 30%, var(--card));
+}
+
+.security-list li:nth-child(even) {
+  border-left: 1px solid var(--border);
+}
+
+.security-list li:nth-child(n + 3) {
+  border-top: 1px solid var(--border);
+}
+
+.security-list li > svg {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  color: var(--success);
+}
+
+.security-list span {
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.security-list strong {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--foreground);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.theme-section {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+  padding: 0.75rem;
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 48%, var(--card));
+}
+
+.theme-note {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  line-height: 1.55;
+}
+
+.maintenance-lock-note {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.spin {
+  animation: settings-spin 0.9s linear infinite;
+}
+
+@keyframes settings-spin {
+  to { transform: rotate(360deg); }
+}
 
 @media (max-width: 980px) {
-  .settings-overview { grid-template-columns: 1fr; }
-  .overview-map { justify-content: flex-start; }
-  .settings-pair-grid { grid-template-columns: 1fr; }
+  .pair-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 860px) {
-  .safety-layout { grid-template-columns: 1fr; }
+  .safety-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .theme-section {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
 }
 
 @media (max-width: 760px) {
-  .version-overview { grid-template-columns: 1fr 1fr; }
-  .version-primary { grid-column: 1 / -1; }
-  .version-workbench { grid-template-columns: 1fr; }
+  .version-tiles {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .version-tiles .tile:first-child {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .version-tiles .tile:nth-child(2) {
+    border-left: 0;
+  }
+
+  .version-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .release-meta {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
 }
 
 @media (max-width: 640px) {
-  .settings-view { gap: 0.8rem; }
-  .settings-overview { gap: 1rem; padding: 1.15rem 1rem; }
-  .overview-map { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .overview-map span { min-width: 0; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
-  .card-header { padding: 1.05rem 1rem 0.85rem; }
-  .card-content { padding: 0 1rem 1rem; }
-  .card-header > :deep([data-slot='badge']) { display: none; }
-  .version-overview { grid-template-columns: 1fr; }
-  .version-primary { grid-column: auto; }
-  .release-meta { align-items: flex-start; flex-direction: column; }
-  .core-actions, .action-row { display: grid; grid-template-columns: 1fr; }
-  .core-actions :deep(button), .action-row :deep(button), .action-row :deep(a) { width: 100%; }
-  .timeline-header { align-items: flex-start; flex-direction: column; }
-  .timeline-track { overflow-x: auto; padding-bottom: 0.35rem; }
-  .timeline-track ol, .timeline-progress { min-width: 28rem; }
-  .credential-fields, .readout-grid { grid-template-columns: 1fr; }
-  .update-summary { grid-template-columns: 1fr 1fr; }
-  .operation-readout { grid-column: 1 / -1; }
-  .fit-action { width: 100%; }
-  .security-list { grid-template-columns: 1fr; }
+  .card-head {
+    gap: 0.6rem;
+  }
+
+  .card-head > [data-slot='badge'] {
+    flex: 0 0 auto;
+  }
+
+  .version-tiles {
+    grid-template-columns: 1fr;
+  }
+
+  .version-tiles .tile:first-child {
+    grid-column: auto;
+  }
+
+  .version-tiles .tile + .tile {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .release-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .action-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .action-row > * {
+    width: 100%;
+  }
+
+  .timeline-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .timeline-track {
+    overflow: visible;
+    padding-bottom: 0;
+  }
+
+  .timeline-track ol,
+  .timeline-progress {
+    min-width: 0;
+  }
+
+  .timeline-track li em {
+    overflow-wrap: anywhere;
+  }
+
+  .credential-fields,
+  .readout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .readout-grid > div + div {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .update-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .operation-readout {
+    grid-column: 1 / -1;
+    border-top: 1px solid var(--border);
+    border-left: 0 !important;
+  }
+
+  .fit-action {
+    width: 100%;
+  }
+
+  .security-list {
+    grid-template-columns: 1fr;
+  }
+
+  .security-list li:nth-child(even) {
+    border-left: 0;
+  }
+
+  .security-list li:nth-child(n + 2) {
+    border-top: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 380px) {
+  .card-head,
+  .card-body {
+    padding-inline: 0.75rem;
+  }
+
+  .card-head {
+    gap: 0.55rem;
+  }
+
+  .card-head > [data-slot='badge'] {
+    max-width: 7rem;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .version-workbench,
+  .credential-fields {
+    padding: 0.6rem;
+  }
+
+  .update-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .update-summary > div + div {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .operation-readout {
+    grid-column: auto;
+  }
+
+  .timeline-track li {
+    font-size: 0.58rem;
+  }
+
+  .timeline-track li > span {
+    width: 1.15rem;
+    height: 1.15rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .spin { animation: none; }
+  .spin {
+    animation: none;
+  }
 }
 </style>

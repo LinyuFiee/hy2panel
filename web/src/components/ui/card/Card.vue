@@ -4,7 +4,7 @@ const props = defineProps({ class: { type: [String, Array, Object], default: und
 </script>
 
 <template>
-  <div data-slot="card" :class="cn('flex flex-col gap-6 rounded-xl border bg-card py-6 text-card-foreground shadow-sm', props.class)">
+  <div data-slot="card" :class="cn('flex min-w-0 flex-col gap-0 overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-[var(--shadow-card)]', props.class)">
     <slot />
   </div>
 </template>

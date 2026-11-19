@@ -10,9 +10,9 @@ export const alertVariants = cva(
     variants: {
       variant: {
         default: 'bg-card text-card-foreground',
-        destructive: 'border-destructive/40 text-destructive [&>svg]:text-current',
-        success: 'border-emerald-500/30 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200',
-        warning: 'border-amber-500/30 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+        destructive: 'border-destructive/25 bg-destructive/8 text-destructive [&>svg]:text-current',
+        success: 'border-success/25 bg-success/8 text-success [&>svg]:text-current',
+        warning: 'border-warning/25 bg-warning/8 text-warning [&>svg]:text-current'
       }
     },
     defaultVariants: { variant: 'default' }

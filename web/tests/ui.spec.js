@@ -1,6 +1,23 @@
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
+const runtimeIssues = new WeakMap()
+
+test.beforeEach(async ({ page }) => {
+  const issues = []
+  runtimeIssues.set(page, issues)
+  page.on('pageerror', error => issues.push(`pageerror: ${error.message}`))
+  page.on('console', message => {
+    if (message.type() === 'error' || message.type() === 'warning') {
+      issues.push(`console.${message.type()}: ${message.text()}`)
+    }
+  })
+})
+
+test.afterEach(async ({ page }) => {
+  expect(runtimeIssues.get(page) || []).toEqual([])
+})
+
 async function resetMock(page) {
   await page.request.get('/api/test/reset')
 }
@@ -9,6 +26,14 @@ async function openConsole(page, section = 'overview') {
   await resetMock(page)
   await page.goto(`/#/${section}`)
   await expect(page.getByRole('heading', { name: section === 'overview' ? '运行概览' : section === 'traffic' ? '流量监控' : section === 'nodes' ? '节点管理' : section === 'maintenance' ? '维护与诊断' : '系统设置' })).toBeVisible()
+}
+
+async function openLogin(page) {
+  await resetMock(page)
+  await page.route('**/api/state', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"请先登录"}' }), { times: 1 })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: '管理员登录' })).toBeVisible()
+  runtimeIssues.get(page)?.splice(0)
 }
 
 async function expectNoHorizontalOverflow(page) {
@@ -22,7 +47,9 @@ async function expectNoHorizontalOverflow(page) {
 }
 
 async function expectNoSeriousA11yViolations(page, { disable = [] } = {}) {
-  const results = await new AxeBuilder({ page }).disableRules(['color-contrast', ...disable]).analyze()
+  const builder = new AxeBuilder({ page })
+  if (disable.length) builder.disableRules(disable)
+  const results = await builder.analyze()
   expect(results.violations.filter(item => ['critical', 'serious'].includes(item.impact))).toEqual([])
 }
 
@@ -77,47 +104,72 @@ async function installFigureLifecycleProbe(page, { reducedMotion = false } = {})
   }, { reduce: reducedMotion })
 }
 
-test('overview shell, theme and server rack render without runtime errors', async ({ page }, testInfo) => {
-  const errors = []
-  page.on('pageerror', error => errors.push(error.message))
+test('login uses the direct Hairline padlock and submits credentials', async ({ page }, testInfo) => {
+  await openLogin(page)
+  const figure = page.locator('[data-hairline="padlock"]')
+  await expect(figure).toBeVisible()
+  await expect(figure).toHaveAttribute('role', 'img')
+  await expect(figure).toHaveAttribute('aria-label', /交互式安全插图/)
+  await expect(figure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
+  await expect(page.getByLabel('管理员密码')).toBeFocused()
+  await page.getByLabel('管理员密码').fill('mock-password')
+  await page.getByRole('button', { name: '登录' }).click()
+  await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
+  await expectNoSeriousA11yViolations(page)
+  await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true })
+})
+
+test('overview shell, grouped cards and theme render without runtime errors', async ({ page }, testInfo) => {
   await openConsole(page)
   await expect(page.getByRole('navigation', { name: '控制台分区' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
-  await expect(page.getByText('节点协议', { exact: true })).toBeVisible()
-  const figure = page.locator('[data-figure="server-rack-flow"]')
-  await expect(figure).toHaveAttribute('data-rack-units', '6')
-  await expect(figure).toHaveAttribute('data-rack-ports', '8')
-  await expect(figure).toHaveAttribute('data-route-order', 'ingress-port-blade-egress')
+  const relayFigure = page.locator('[data-hairline="relay"]')
+  await expect(relayFigure).toBeVisible()
+  await expect(relayFigure).toHaveAttribute('role', 'img')
+  await expect(relayFigure).toHaveAttribute('aria-label', /不是实时遥测/)
+  await expect(relayFigure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
+  const figure = page.locator('[data-figure="node-flow"]')
+  await expect(figure).toBeVisible()
+  await expect(figure).toHaveAttribute('data-animation-state', 'playing')
   await expect(figure).toHaveAttribute('role', 'img')
   await expect(figure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
-  await expect(page.getByText(/小路由器|router|antenna/i)).toHaveCount(0)
+  await expect(page.getByText('节点协议', { exact: true })).toBeVisible()
+  await expect(page.getByText('套餐流量', { exact: true })).toBeVisible()
+  await expect(page.getByText('系统', { exact: true })).toBeVisible()
+  await expect(page.getByText(/小路由器|router|antenna|机架|服务器刀片/i)).toHaveCount(0)
   await page.getByRole('button', { name: '深色' }).click()
   await expect(page.locator('html')).toHaveClass(/dark/)
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#0b0b0c')
   await expectNoSeriousA11yViolations(page)
   await page.screenshot({ path: testInfo.outputPath('overview.png'), fullPage: true })
-  expect(errors).toEqual([])
 })
 
-test('server rack respects reduced motion and lifecycle cleanup', async ({ page }) => {
+test('overview node-flow figure respects reduced motion and pointer progress', async ({ page }) => {
   await installFigureLifecycleProbe(page, { reducedMotion: true })
-  await page.route('**/api/state', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"请先登录"}' }))
-  await page.goto('/')
-  const figure = page.locator('[data-figure="server-rack-flow"]')
+  await resetMock(page)
+  await page.goto('/#/overview')
+  await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
+  const figure = page.locator('[data-figure="node-flow"]')
   await expect(figure).toBeVisible()
   await expect(figure).toHaveAttribute('data-animation-state', 'reduced-motion')
   const restingProgress = await figure.getAttribute('data-progress')
   await page.waitForTimeout(150)
   await expect(figure).toHaveAttribute('data-progress', restingProgress)
-  expect(await page.evaluate(() => window.__figureLifecycle.requests)).toBe(0)
+  const lifecycle = await page.evaluate(() => ({
+    requests: window.__figureLifecycle.requests,
+    active: window.__figureLifecycle.active.size
+  }))
+  expect(lifecycle.requests).toBeLessThanOrEqual(1)
+  expect(lifecycle.active).toBe(0)
+  await figure.scrollIntoViewIfNeeded()
   const box = await figure.boundingBox()
   await page.mouse.move(box.x + box.width * 0.82, box.y + box.height * 0.75)
   await expect.poll(async () => Number(await figure.getAttribute('data-progress'))).toBeGreaterThan(0.65)
-  await page.unroute('**/api/state')
 })
 
 test('nodes use progressive settings and on-demand credential dialogs', async ({ page }, testInfo) => {
   await openConsole(page, 'nodes')
-  await expect(page.getByRole('heading', { name: '节点公网 Endpoint' })).toBeVisible()
+  await expect(page.getByText('节点公网地址', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '🇺🇸 US-Reality' })).toBeVisible()
   await expect(page.getByRole('heading', { name: '🇺🇸 US-Hysteria2' })).toBeVisible()
   await page.getByRole('button', { name: /高级密钥与身份/ }).click()
@@ -151,10 +203,10 @@ test('traffic workspace keeps protocol gaps and speedtest states', async ({ page
 
 test('maintenance exposes manual tabs, diagnostics and recovery policy', async ({ page }, testInfo) => {
   await openConsole(page, 'maintenance')
-  await expect(page.getByRole('heading', { name: '恢复、诊断与日志，一处完成。' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '服务端问题自检' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '恢复策略' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '服务端自检' })).toBeVisible()
   await page.getByRole('button', { name: '开始自检' }).click()
-  await expect(page.getByRole('heading', { name: '检查结果与修复建议' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '检查结果' })).toBeVisible()
   const tabs = page.getByRole('tablist', { name: '日志单元' })
   await expect(tabs).toBeVisible()
   await page.getByRole('tab', { name: '面板' }).click()
@@ -177,23 +229,24 @@ test('settings use accessible confirmation dialogs and operation states', async 
   await page.getByRole('button', { name: '回滚上一版本' }).click()
   await page.getByRole('button', { name: '确认回滚' }).click()
   await expect(core).toContainText('sing-box 已运行 v1.14.3', { timeout: 8000 })
-  await expect(page.getByText('访问安全', { exact: true })).toBeVisible()
+  await expect(page.getByText('仅通过 HTTPS 访问')).toBeVisible()
   await page.getByRole('button', { name: '检测更新' }).click()
-  await expect(page.getByText('v0.6.0', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('v0.6.1', { exact: true }).first()).toBeVisible()
   await page.getByRole('button', { name: '立即更新' }).click()
   await page.getByRole('button', { name: '确认更新' }).click()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await expectNoSeriousA11yViolations(page, { disable: ['aria-hidden-focus'] })
   await page.screenshot({ path: testInfo.outputPath('settings.png'), fullPage: true })
 })
 
-test('mobile sheet exposes every workspace and logout without overflow', async ({ page }, testInfo) => {
+test('mobile bottom tab bar exposes every workspace and logout without overflow', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await openConsole(page)
-  await page.getByRole('button', { name: '打开导航菜单' }).click()
-  const sheet = page.getByRole('dialog')
-  for (const label of ['概览', '节点', '流量', '维护', '设置']) await expect(sheet.getByText(label, { exact: true })).toBeVisible()
-  await expect(sheet.getByRole('button', { name: '退出登录' })).toBeVisible()
-  await sheet.getByText('流量', { exact: true }).click()
+  const tabbar = page.getByRole('navigation', { name: '底部导航' })
+  await expect(tabbar).toBeVisible()
+  for (const label of ['概览', '节点', '流量', '维护', '设置']) await expect(tabbar.getByText(label, { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '退出登录' })).toBeVisible()
+  await tabbar.getByText('流量', { exact: true }).click()
   await expect(page.getByRole('heading', { name: '流量监控' })).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true })

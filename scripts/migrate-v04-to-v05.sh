@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
+
+TARGET_VERSION=v0.6.1
+
+hy2panel_valid_migration_target() {
+  local version=${1:-}
+  [[ ${version} =~ ^v0\.[0-9]+\.[0-9]+$ ]]
+}
+
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
+  return 0
+fi
+
 set -Eeuo pipefail
+
+REPOSITORY=${HY2PANEL_REPOSITORY:-LinyuFiee/hy2panel}
+hy2panel_valid_migration_target "${TARGET_VERSION}" || { printf '迁移器目标版本无效。\n' >&2; exit 1; }
 
 if [[ ${EUID} -ne 0 ]]; then
   printf '请使用 root 运行。\n' >&2
   exit 1
 fi
-
-TARGET_VERSION=v0.6.0
-REPOSITORY=${HY2PANEL_REPOSITORY:-LinyuFiee/hy2panel}
-[[ ${TARGET_VERSION} =~ ^v0\.5\.[0-9]+$ ]] || { printf '迁移器目标版本无效。\n' >&2; exit 1; }
 [[ -f /etc/hy2panel/panel.json ]] || { printf '未检测到现有 hy2panel 配置。\n' >&2; exit 1; }
 
 verify_sha256_file() {
