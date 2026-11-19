@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/migrate-v04-to-v05.sh"
 
+# shellcheck source=scripts/migrate-v04-to-v05.sh
 source "${SCRIPT}"
 
 hy2panel_valid_migration_target "${TARGET_VERSION}"
@@ -22,6 +23,8 @@ copy="$(mktemp)"
 trap 'rm -f "${copy}"' EXIT
 cp "${SCRIPT}" "${copy}"
 sed -i 's/^TARGET_VERSION=.*/TARGET_VERSION=v0.9.8/' "${copy}"
+# The copied helper is intentionally dynamic so the release rewrite can be tested.
+# shellcheck disable=SC1090
 source "${copy}"
 [[ ${TARGET_VERSION} == v0.9.8 ]]
 hy2panel_valid_migration_target "${TARGET_VERSION}"
