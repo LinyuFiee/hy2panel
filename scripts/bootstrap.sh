@@ -163,16 +163,7 @@ verify_sha256_file() {
   [[ ${actual} == "${digest}" ]]
 }
 
-RELEASE_PATH=latest/download
-if [[ -n ${HY2PANEL_VERSION:-} ]]; then
-  if [[ ! ${HY2PANEL_VERSION} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf 'HY2PANEL_VERSION 必须是 vX.Y.Z 格式。\n' >&2
-    exit 1
-  fi
-  RELEASE_PATH="download/${HY2PANEL_VERSION}"
-fi
-
-BASE_URL="https://github.com/${REPOSITORY}/releases/${RELEASE_PATH}"
+BASE_URL="https://github.com/${REPOSITORY}/releases/latest/download"
 BUNDLE=hy2panel-bundle-linux-amd64.tar.gz
 curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${BASE_URL}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
 curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${BASE_URL}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"

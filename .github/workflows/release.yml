@@ -206,23 +206,11 @@ jobs:
           diff -u "${expected}" "${actual}"
           ! grep -q 'firewall' "${actual}"
 
-      - name: Copy standalone v0.4 migration helper
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          install -m 0755 scripts/migrate-v04-to-v05.sh release/migrate-v04-to-v05.sh
-          sed -i "s/^TARGET_VERSION=.*/TARGET_VERSION=${RELEASE_TAG}/" release/migrate-v04-to-v05.sh
-          grep -q "^TARGET_VERSION=${RELEASE_TAG}$" release/migrate-v04-to-v05.sh
-          bash -n release/migrate-v04-to-v05.sh
-          source release/migrate-v04-to-v05.sh
-          hy2panel_valid_migration_target "${TARGET_VERSION}"
-
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             release/hy2panel-bundle-linux-amd64.tar.gz
-            release/migrate-v04-to-v05.sh
 
       - name: Publish GitHub release
         env:
@@ -234,13 +222,11 @@ jobs:
             gh release upload "${RELEASE_TAG}" \
               "release/${BUNDLE}" \
               "release/${BUNDLE}.sha256" \
-              "release/migrate-v04-to-v05.sh" \
               --clobber
           else
             gh release create "${RELEASE_TAG}" \
               "release/${BUNDLE}" \
               "release/${BUNDLE}.sha256" \
-              "release/migrate-v04-to-v05.sh" \
               --verify-tag \
               --title "${RELEASE_TAG}" \
               --generate-notes

@@ -3,6 +3,7 @@
 .codeartsdoer/
 .agents/
 .zcode/
+.workbuddy/
 dist/
 release/
 node_modules/

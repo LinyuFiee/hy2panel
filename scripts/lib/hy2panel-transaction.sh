@@ -134,6 +134,28 @@ hy2panel_verify_sha256_file() {
   [[ ${actual} == "${digest}" ]]
 }
 
+hy2panel_min_panel_version() {
+  printf '%s\n' 0.6.1
+}
+
+hy2panel_version_at_least() {
+  local candidate=${1:-} floor=${2:-$(hy2panel_min_panel_version)}
+  local -a candidate_parts floor_parts
+  local index
+  [[ ${candidate} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  IFS=. read -r -a candidate_parts <<< "${candidate}"
+  IFS=. read -r -a floor_parts <<< "${floor}"
+  for index in 0 1 2; do
+    if ((10#${candidate_parts[index]} > 10#${floor_parts[index]})); then
+      return 0
+    fi
+    if ((10#${candidate_parts[index]} < 10#${floor_parts[index]})); then
+      return 1
+    fi
+  done
+  return 0
+}
+
 hy2panel_archive_members_safe() {
   local archive=$1 listing verbose name
   listing="$(mktemp)"

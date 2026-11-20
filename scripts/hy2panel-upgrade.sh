@@ -278,6 +278,10 @@ remove_legacy_firewall() {
 
 [[ -f ${REQUEST} && -f ${BASE}/panel.json ]]
 parse_request
+if ! hy2panel_version_at_least "${TARGET_VERSION}"; then
+  atomic_json_result failed_no_change "不再支持 ${TARGET_VERSION}：面板最低可升级版本为 $(hy2panel_min_panel_version)"
+  exit 1
+fi
 install -d -o root -g root -m 700 "${STATE_ROOT}" "${TRANSACTIONS}"
 if ! hy2panel_lock_maintenance; then
   atomic_json_result failed_no_change '另一个维护任务正在运行' false false
