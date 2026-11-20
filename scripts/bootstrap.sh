@@ -25,6 +25,11 @@ if [[ ! ${REPOSITORY} =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   exit 1
 fi
 
+if [[ -n ${HY2PANEL_VERSION:-} ]]; then
+  printf 'HY2PANEL_VERSION 已不再支持（检测到 %s）：安装器始终下载最新稳定 Release，仅接受 0.6.1 及以上版本。\n' "${HY2PANEL_VERSION}" >&2
+  exit 1
+fi
+
 source /etc/os-release
 if [[ ${ID} != debian || ${VERSION_ID} != 12 ]]; then
   printf '一键安装仅支持 Debian 12。\n' >&2
