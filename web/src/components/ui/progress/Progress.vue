@@ -15,7 +15,7 @@ const percentage = computed(() => {
 </script>
 
 <template>
-  <ProgressRoot :model-value="modelValue" :max="max" :class="cn('relative h-2 w-full overflow-hidden rounded-full bg-primary/20', props.class)">
-    <ProgressIndicator class="h-full w-full flex-1 bg-primary transition-transform" :style="{ transform: `translateX(-${100 - percentage}%)` }" />
+  <ProgressRoot :model-value="modelValue" :max="max" :class="cn('relative h-1.5 w-full overflow-hidden rounded-full bg-secondary', props.class)">
+    <ProgressIndicator class="h-full w-full flex-1 bg-chart-1 transition-transform" :style="{ transform: `translateX(-${100 - percentage}%)` }" />
   </ProgressRoot>
 </template>

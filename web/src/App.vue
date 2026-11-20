@@ -1,19 +1,9 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  Activity,
   AlertTriangle,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Cpu,
-  Database,
   ExternalLink,
-  HardDrive,
-  HeartPulse,
   LogOut,
-  MemoryStick,
-  Menu,
-  Network,
   ShieldCheck,
   Wrench
 } from '@lucide/vue'
@@ -22,21 +12,11 @@ import DashboardView from './components/DashboardView.vue'
 import NodesView from './components/NodesView.vue'
 import MaintenanceView from './components/MaintenanceView.vue'
 import SettingsView from './components/SettingsView.vue'
+import OverviewView from './components/OverviewView.vue'
 import ThemeToggle from './components/ThemeToggle.vue'
-import HairlineFigure from './components/HairlineFigure.vue'
 import GithubIcon from './components/GithubIcon.vue'
 import LoginPage from './pages/LoginPage.vue'
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert'
-import { Button } from './components/ui/button'
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger
-} from './components/ui/sheet'
 import { Spinner } from './components/ui/spinner'
 import { NAV_ITEMS, DEFAULT_SECTION, findNavItem, hashForSection, sectionFromHash } from './app/navigation'
 import { createApiClient, isCanceledRequest } from './api/client'
@@ -47,7 +27,6 @@ import { useNodeDraft } from './composables/useNodeDraft'
 import { usePolling } from './composables/usePolling'
 import { useSessionReset } from './composables/useSessionReset'
 import { useTrafficHistory } from './composables/useTrafficHistory'
-import { formatBytes, formatRate, percent, sumBytes } from './utils'
 
 const view = ref('loading')
 const activeTab = ref(DEFAULT_SECTION)
@@ -55,7 +34,6 @@ const password = ref('')
 const error = ref('')
 const notice = ref('')
 const loginBusy = ref(false)
-const mobileNavOpen = ref(false)
 const state = ref(null)
 const settingsRef = ref(null)
 const singBoxVersions = ref(null)
@@ -75,8 +53,6 @@ const panelAddress = computed(() => {
 const serviceHealthy = computed(() => state.value?.status?.sing_box === 'active')
 const overviewStatus = computed(() => state.value?.status || {})
 const overviewRackNerd = computed(() => state.value?.racknerd || { configured: false })
-const overviewMemoryPercent = computed(() => percent(overviewStatus.value.memory_used_mb, overviewStatus.value.memory_total_mb))
-const overviewDiskPercent = computed(() => percent(overviewStatus.value.disk_used_bytes, overviewStatus.value.disk_total_bytes))
 const maintenanceLabel = computed(() => maintenanceBusy.value ? '维护任务运行中' : '无维护任务')
 const routeAnnouncement = computed(() => `当前页面：${currentNavItem.value.title}`)
 
@@ -179,7 +155,6 @@ function handleUnauthorized() {
   resetSession('unauthorized')
   error.value = ''
   notice.value = ''
-  mobileNavOpen.value = false
   activeTab.value = DEFAULT_SECTION
   view.value = 'login'
 }
@@ -245,7 +220,11 @@ async function initializeAuthenticatedSession() {
   const authenticated = await refresh(true, true)
   if (!authenticated || view.value !== 'app') return false
   syncSectionFromHash({ replaceInvalid: true })
-  await Promise.all([refreshSystemStatus(), refreshTrafficLive(), loadTrafficHistory(trafficHistoryRange.value)])
+  const initialRequests = [refreshSystemStatus()]
+  if (activeTab.value === 'traffic') {
+    initialRequests.push(refreshTrafficLive(), loadTrafficHistory(trafficHistoryRange.value))
+  }
+  await Promise.all(initialRequests)
   if (activeTab.value === 'maintenance' && !logEntries.value.length) loadLogs()
   if (activeTab.value === 'settings') loadSingBoxVersions()
   if (!authStopped && view.value === 'app') startPolling()
@@ -281,7 +260,6 @@ async function logout() {
     resetSession('logout')
     error.value = ''
     notice.value = ''
-    mobileNavOpen.value = false
     activeTab.value = DEFAULT_SECTION
     view.value = 'login'
   }
@@ -291,11 +269,14 @@ function switchTab(tab, { updateHash = true } = {}) {
   const section = findNavItem(tab).id
   activeTab.value = section
   window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  mobileNavOpen.value = false
   error.value = ''
   notice.value = ''
   if (updateHash) ensureSectionHash(section)
-  if (section === 'overview' || section === 'traffic') loadTrafficHistory(trafficHistoryRange.value)
+  if (section === 'traffic') {
+    refreshSystemStatus()
+    refreshTrafficLive()
+    loadTrafficHistory(trafficHistoryRange.value)
+  }
   if (section === 'maintenance' && !logEntries.value.length) loadLogs()
   if (section === 'settings') loadSingBoxVersions()
 }
@@ -505,13 +486,13 @@ function startPolling() {
     {
       id: 'live',
       interval: 2500,
-      when: () => view.value === 'app' && !document.hidden,
+      when: () => view.value === 'app' && activeTab.value === 'traffic' && !document.hidden,
       run: () => {
         refreshSystemStatus()
         refreshTrafficLive()
       }
     },
-    { id: 'history', interval: 60000, when: () => view.value === 'app' && ['overview', 'traffic'].includes(activeTab.value) && !document.hidden, run: () => loadTrafficHistory(trafficHistoryRange.value) },
+    { id: 'history', interval: 60000, when: () => view.value === 'app' && activeTab.value === 'traffic' && !document.hidden, run: () => loadTrafficHistory(trafficHistoryRange.value) },
     { id: 'sing-box', interval: 3000, when: () => view.value === 'app' && activeTab.value === 'settings' && !document.hidden, run: () => loadSingBoxVersions() }
   ])
 }
@@ -520,8 +501,10 @@ function handleVisibilityChange() {
   if (document.hidden || authStopped || view.value !== 'app') return
   refresh(false, false)
   refreshSystemStatus()
-  refreshTrafficLive()
-  if (['overview', 'traffic'].includes(activeTab.value)) loadTrafficHistory(trafficHistoryRange.value)
+  if (activeTab.value === 'traffic') {
+    refreshTrafficLive()
+    loadTrafficHistory(trafficHistoryRange.value)
+  }
   if (activeTab.value === 'settings') loadSingBoxVersions()
 }
 
@@ -547,10 +530,10 @@ onBeforeUnmount(() => {
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
 
-  <main v-if="view === 'loading'" id="main-content" class="control-loading" tabindex="-1" aria-live="polite">
-    <div class="control-loading-mark"><img src="/logo.png" alt="" /></div>
-    <Spinner label="正在连接控制平面" class="control-loading-spinner" />
-    <div><strong>正在连接控制平面</strong><span>读取服务状态与节点配置</span></div>
+  <main v-if="view === 'loading'" id="main-content" class="boot" tabindex="-1" aria-live="polite">
+    <img class="boot-logo" src="/logo.png" alt="" />
+    <Spinner label="正在连接控制平面" class="boot-spinner" />
+    <strong>正在连接控制平面</strong>
   </main>
 
   <LoginPage
@@ -561,14 +544,13 @@ onBeforeUnmount(() => {
     @submit="login"
   />
 
-  <div v-else class="control-shell">
-    <aside class="control-sidebar" aria-label="主导航">
-      <a class="control-brand" :href="hashForSection('overview')" @click.prevent="switchTab('overview')">
-        <img src="/logo.png" alt="" />
-        <span><strong>hy2panel</strong><small>CONTROL PLANE</small></span>
+  <div v-else class="shell">
+    <aside class="sidebar">
+      <a class="brand" :href="hashForSection('overview')" @click.prevent="switchTab('overview')">
+        <img src="/logo.png" alt="" /><span>hy2panel</span>
       </a>
 
-      <nav class="control-nav" aria-label="控制台分区">
+      <nav class="side-nav" aria-label="控制台分区">
         <a
           v-for="item in NAV_ITEMS"
           :key="item.id"
@@ -577,160 +559,74 @@ onBeforeUnmount(() => {
           :aria-current="activeTab === item.id ? 'page' : undefined"
           @click.prevent="switchTab(item.id)"
         >
-          <component :is="item.icon" :size="17" />
+          <component :is="item.icon" :size="18" />
           <span>{{ item.label }}</span>
-          <i aria-hidden="true"></i>
         </a>
       </nav>
 
-      <div class="control-sidebar-footer">
-        <div class="sidebar-health">
-          <span class="health-orbit" :class="{ warn: !serviceHealthy }"><i></i></span>
-          <div><strong>{{ serviceHealthy ? '系统正常' : '需要检查' }}</strong><span>sing-box {{ serviceHealthy ? 'active' : 'inactive' }}</span></div>
-        </div>
-        <a class="sidebar-external" href="https://github.com/LinyuFiee/hy2panel" target="_blank" rel="noopener noreferrer">
+      <div class="side-foot">
+        <a class="side-link" href="https://github.com/LinyuFiee/hy2panel" target="_blank" rel="noopener noreferrer">
           <GithubIcon /><span>GitHub</span><ExternalLink :size="12" />
         </a>
-        <button class="sidebar-logout" type="button" @click="logout"><LogOut :size="15" /><span>退出登录</span></button>
       </div>
     </aside>
 
-    <div class="control-workspace">
-      <header class="control-topbar">
-        <div class="mobile-brand-group">
-          <Sheet v-model:open="mobileNavOpen">
-            <SheetTrigger as-child>
-              <Button variant="outline" size="icon" class="mobile-menu-button" aria-label="打开导航菜单"><Menu :size="18" /></Button>
-            </SheetTrigger>
-            <SheetContent side="left" class="mobile-nav-sheet" :show-close-button="true">
-              <SheetHeader class="mobile-sheet-header">
-                <SheetTitle class="mobile-sheet-title"><img src="/logo.png" alt="" />hy2panel</SheetTitle>
-                <SheetDescription>私有节点控制平面</SheetDescription>
-              </SheetHeader>
-              <nav class="mobile-sheet-nav" aria-label="移动端控制台分区">
-                <SheetClose v-for="item in NAV_ITEMS" :key="item.id" as-child>
-                  <a
-                    :href="hashForSection(item.id)"
-                    :class="{ active: activeTab === item.id }"
-                    :aria-current="activeTab === item.id ? 'page' : undefined"
-                    @click="switchTab(item.id, { updateHash: false })"
-                  >
-                    <component :is="item.icon" :size="18" />
-                    <span><strong>{{ item.label }}</strong><small>{{ item.description }}</small></span>
-                  </a>
-                </SheetClose>
-              </nav>
-              <div class="mobile-sheet-footer">
-                <div class="mobile-panel-address"><span>面板地址</span><strong>{{ panelAddress }}</strong></div>
-                <ThemeToggle label="界面主题" />
-                <a href="https://github.com/LinyuFiee/hy2panel" target="_blank" rel="noopener noreferrer"><GithubIcon />GitHub<ExternalLink :size="13" /></a>
-                <button type="button" @click="logout"><LogOut :size="16" />退出登录</button>
-              </div>
-            </SheetContent>
-          </Sheet>
-          <a class="mobile-control-brand" :href="hashForSection('overview')" @click.prevent="switchTab('overview')"><img src="/logo.png" alt="" /><strong>hy2panel</strong></a>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="topbar-context">
+          <img src="/logo.png" alt="" />
+          <strong class="topbar-title">{{ currentNavItem.label }}</strong>
         </div>
-
-        <div class="control-breadcrumb" aria-label="当前位置">
-          <span>控制台</span><i>/</i><strong>{{ currentNavItem.shortLabel }}</strong>
-        </div>
-
-        <div class="control-topbar-actions">
-          <div class="topbar-status" :class="{ warn: !serviceHealthy }" :title="serviceHealthy ? 'sing-box 服务运行正常' : 'sing-box 服务需要检查'">
-            <HeartPulse :size="14" /><span>{{ serviceHealthy ? '健康' : '异常' }}</span>
-          </div>
-          <div class="topbar-status maintenance" :class="{ active: maintenanceBusy }" :title="maintenanceLabel">
-            <Wrench :size="14" /><span>{{ maintenanceBusy ? '维护中' : '空闲' }}</span>
-          </div>
+        <div class="topbar-actions">
+          <span class="chip" :class="serviceHealthy ? 'chip-ok' : 'chip-bad'" :title="serviceHealthy ? 'sing-box 服务运行正常' : 'sing-box 服务需要检查'">
+            <i></i><span>{{ serviceHealthy ? '在线' : '异常' }}</span>
+          </span>
+          <span class="chip" :class="{ 'chip-warn': maintenanceBusy }" :title="maintenanceLabel">
+            <Wrench :size="12" /><span>{{ maintenanceBusy ? '维护中' : '空闲' }}</span>
+          </span>
           <ThemeToggle compact />
+          <button class="icon-btn" type="button" aria-label="退出登录" title="退出登录" @click="logout">
+            <LogOut :size="16" />
+          </button>
         </div>
       </header>
 
-      <main id="main-content" class="control-main" tabindex="-1">
+      <main id="main-content" class="content" tabindex="-1">
         <div class="route-announcement sr-only" aria-live="polite">{{ routeAnnouncement }}</div>
-        <header class="control-page-heading">
-          <div>
-            <span>{{ currentNavItem.eyebrow }}</span>
+
+        <header class="page-head">
+          <div class="page-heading">
+            <p class="page-eyebrow">{{ currentNavItem.eyebrow }}</p>
             <h1>{{ currentNavItem.title }}</h1>
-            <p>{{ currentNavItem.description }}</p>
+            <p class="page-description">{{ currentNavItem.description }}</p>
           </div>
-          <div class="control-page-meta">
-            <span :class="serviceHealthy ? 'ok' : 'warn'"><i></i>{{ serviceHealthy ? 'sing-box active' : 'sing-box inactive' }}</span>
-            <small>{{ panelAddress }}</small>
+          <div class="page-meta">
+            <span>控制平面</span>
+            <small class="tnum">{{ panelAddress }}</small>
           </div>
         </header>
 
-        <Alert v-if="error" variant="destructive" class="control-alert" aria-live="assertive">
+        <Alert v-if="error" variant="destructive" class="page-alert" aria-live="assertive">
           <AlertTriangle />
           <AlertTitle>操作未完成</AlertTitle>
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <Alert v-if="notice" variant="success" class="control-alert" aria-live="polite">
+        <Alert v-if="notice" variant="success" class="page-alert" aria-live="polite">
           <ShieldCheck />
           <AlertTitle>操作已完成</AlertTitle>
           <AlertDescription>{{ notice }}</AlertDescription>
         </Alert>
 
-        <div class="control-view" :data-section="activeTab">
-          <div v-if="activeTab === 'overview'" class="overview-shell-grid">
-            <section class="overview-stat-grid" aria-label="主机关键指标">
-              <article class="overview-stat-card">
-                <div class="overview-stat-icon mint"><Cpu :size="18" /></div>
-                <span>CPU 使用率</span>
-                <strong>{{ Number(overviewStatus.cpu_percent || 0).toFixed(1) }}%</strong>
-                <div class="overview-stat-track"><i :style="{ width: `${Math.min(Number(overviewStatus.cpu_percent || 0), 100)}%` }"></i></div>
-                <small>负载 {{ overviewStatus.load_average || '—' }}</small>
-              </article>
-              <article class="overview-stat-card">
-                <div class="overview-stat-icon violet"><MemoryStick :size="18" /></div>
-                <span>内存占用</span>
-                <strong>{{ overviewStatus.memory_used_mb || 0 }} MB</strong>
-                <div class="overview-stat-track violet"><i :style="{ width: `${overviewMemoryPercent}%` }"></i></div>
-                <small>共 {{ overviewStatus.memory_total_mb || 0 }} MB · {{ overviewMemoryPercent.toFixed(0) }}%</small>
-              </article>
-              <article class="overview-stat-card">
-                <div class="overview-stat-icon amber"><HardDrive :size="18" /></div>
-                <span>系统磁盘</span>
-                <strong>{{ formatBytes(overviewStatus.disk_used_bytes) }}</strong>
-                <div class="overview-stat-track amber"><i :style="{ width: `${overviewDiskPercent}%` }"></i></div>
-                <small>共 {{ formatBytes(overviewStatus.disk_total_bytes) }} · {{ overviewDiskPercent.toFixed(0) }}%</small>
-              </article>
-              <article class="overview-stat-card">
-                <div class="overview-stat-icon blue"><Network :size="18" /></div>
-                <span>主机实时速率</span>
-                <strong>{{ formatRate(sumBytes(overviewStatus.rx_bytes_per_second, overviewStatus.tx_bytes_per_second)) }}</strong>
-                <div class="overview-rate-pair"><small><ArrowDownToLine :size="12" />{{ formatRate(overviewStatus.rx_bytes_per_second) }}</small><small><ArrowUpFromLine :size="12" />{{ formatRate(overviewStatus.tx_bytes_per_second) }}</small></div>
-              </article>
-            </section>
-            <section class="overview-visual-card">
-              <div class="overview-visual-copy">
-                <span>DATA PATH</span>
-                <h2>服务器路径</h2>
-                <p>入口、配线端口、服务器刀片与出口构成单一数据链路。</p>
-              </div>
-              <HairlineFigure :play="false" :intensity="0.42" theme="auto" density="compact" label="服务器机架实时路径：入口、配线端口、服务器刀片与出口" />
-            </section>
-            <section class="overview-quick-grid">
-              <article class="overview-quick-card">
-                <div><span>PROTOCOL STATUS</span><h2>节点协议</h2></div>
-                <div class="overview-protocol-list">
-                  <div><i :class="{ active: state.config.reality?.enabled }"></i><span><strong>Reality</strong><small>TCP · {{ state.config.reality?.port || '—' }}</small></span><em>{{ state.config.reality?.enabled ? '在线' : '停用' }}</em></div>
-                  <div><i :class="{ active: state.config.hysteria2?.enabled }"></i><span><strong>Hysteria2</strong><small>UDP · {{ state.config.hysteria2?.port || '—' }}</small></span><em>{{ state.config.hysteria2?.enabled ? '在线' : '停用' }}</em></div>
-                </div>
-                <button type="button" @click="switchTab('nodes')">管理节点 <ExternalLink :size="14" /></button>
-              </article>
-              <article class="overview-quick-card">
-                <div><span>TRAFFIC SNAPSHOT</span><h2>流量速览</h2></div>
-                <div class="overview-traffic-total"><Database :size="20" /><span><strong>{{ overviewRackNerd.info ? formatBytes(overviewRackNerd.info.bandwidth_used) : '未连接' }}</strong><small>{{ overviewRackNerd.info ? `本月已用 · ${Number(overviewRackNerd.info.percent_used || 0).toFixed(1)}%` : '配置 RackNerd 后显示套餐流量' }}</small></span></div>
-                <button type="button" @click="switchTab('traffic')">查看流量分析 <ExternalLink :size="14" /></button>
-              </article>
-              <article class="overview-quick-card health-card">
-                <div><span>SYSTEM READINESS</span><h2>运行状态</h2></div>
-                <div class="overview-health-readout"><Activity :size="21" /><span><strong>{{ serviceHealthy ? '服务就绪' : '服务异常' }}</strong><small>{{ maintenanceBusy ? '维护任务正在运行' : '当前没有维护任务' }}</small></span></div>
-                <button type="button" @click="switchTab('maintenance')">打开维护中心 <ExternalLink :size="14" /></button>
-              </article>
-            </section>
-          </div>
+        <div class="view" :data-section="activeTab">
+          <OverviewView
+            v-if="activeTab === 'overview'"
+            :config="state.config"
+            :status="overviewStatus"
+            :racknerd="overviewRackNerd"
+            :healthy="serviceHealthy"
+            :maintenance-busy="maintenanceBusy"
+            @goto="switchTab"
+          />
           <DashboardView
             v-else-if="activeTab === 'traffic'"
             :state="state"
@@ -784,6 +680,20 @@ onBeforeUnmount(() => {
           />
         </div>
       </main>
+
+      <nav class="tabbar" aria-label="底部导航">
+        <a
+          v-for="item in NAV_ITEMS"
+          :key="item.id"
+          :href="hashForSection(item.id)"
+          :class="{ active: activeTab === item.id }"
+          :aria-current="activeTab === item.id ? 'page' : undefined"
+          @click.prevent="switchTab(item.id)"
+        >
+          <component :is="item.icon" :size="20" />
+          <span>{{ item.label }}</span>
+        </a>
+      </nav>
     </div>
   </div>
 </template>
@@ -795,12 +705,12 @@ onBeforeUnmount(() => {
   top: 0.75rem;
   left: 0.75rem;
   transform: translateY(-180%);
-  padding: 0.65rem 0.9rem;
-  border-radius: 0.5rem;
-  background: var(--foreground);
-  color: var(--background);
+  padding: 0.6rem 0.9rem;
+  border-radius: 0.6rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 600;
   text-decoration: none;
   transition: transform 0.15s ease;
 }
@@ -809,977 +719,502 @@ onBeforeUnmount(() => {
   transform: translateY(0);
 }
 
-.control-loading {
+.boot {
   min-height: 100svh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.9rem;
-  background:
-    radial-gradient(circle at 50% 45%, color-mix(in oklab, var(--primary) 12%, transparent), transparent 22rem),
-    var(--background);
-  color: var(--foreground);
-}
-
-.control-loading:focus,
-.control-main:focus {
-  outline: none;
-}
-
-.control-loading-mark {
-  width: 2.75rem;
-  height: 2.75rem;
   display: grid;
   place-items: center;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: var(--card);
-}
-
-.control-loading-mark img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.control-loading-spinner {
-  color: var(--primary);
-}
-
-.control-loading strong,
-.control-loading span {
-  display: block;
-}
-
-.control-loading strong {
-  font-size: 0.82rem;
-}
-
-.control-loading span {
-  margin-top: 0.18rem;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-}
-
-.control-shell {
-  min-height: 100svh;
-  display: grid;
-  grid-template-columns: 12.5rem minmax(0, 1fr);
+  align-content: center;
+  gap: 0.8rem;
   background: var(--background);
   color: var(--foreground);
 }
 
-.control-sidebar {
+.boot:focus {
+  outline: none;
+}
+
+.boot-logo {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.85rem;
+}
+
+.boot-spinner {
+  color: var(--primary);
+}
+
+.boot strong {
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.shell {
+  min-height: 100svh;
+  display: grid;
+  grid-template-columns: 14rem minmax(0, 1fr);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* ---------- sidebar ---------- */
+
+.sidebar {
   position: sticky;
   z-index: 30;
   top: 0;
   height: 100svh;
   display: flex;
   flex-direction: column;
-  padding: 1.1rem 0.8rem 0.8rem;
+  padding: 0.8rem;
   border-right: 1px solid var(--border);
-  background: color-mix(in oklab, var(--card) 91%, var(--background));
+  background: color-mix(in srgb, var(--card) 92%, var(--background));
 }
 
-.control-brand {
+.brand {
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  min-width: 0;
-  padding: 0.25rem 0.45rem;
+  min-height: 2.4rem;
+  padding: 0.2rem 0.55rem;
   color: var(--foreground);
   text-decoration: none;
 }
 
-.control-brand img,
-.mobile-control-brand img,
-.mobile-sheet-title img {
-  width: 2rem;
-  height: 2rem;
-  flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 0.58rem;
-  background: var(--background);
-  object-fit: contain;
+.brand img {
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.45rem;
 }
 
-.control-brand span,
-.control-brand strong,
-.control-brand small {
-  display: block;
-  min-width: 0;
-}
-
-.control-brand strong {
-  font-size: 0.85rem;
+.brand span {
+  font-size: 0.9rem;
+  font-weight: 650;
   letter-spacing: -0.02em;
 }
 
-.control-brand small {
-  margin-top: 0.1rem;
-  color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.5rem;
-  letter-spacing: 0.12em;
-}
-
-.control-nav {
+.side-nav {
   display: grid;
   gap: 0.2rem;
-  margin-top: 2rem;
+  margin-top: 1.7rem;
 }
 
-.control-nav a {
+.side-nav a {
   position: relative;
-  display: grid;
-  grid-template-columns: 1.25rem 1fr auto;
+  display: flex;
   align-items: center;
-  gap: 0.55rem;
-  min-height: 2.45rem;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid transparent;
+  gap: 0.65rem;
+  min-height: 2.4rem;
+  padding: 0.45rem 0.7rem;
   border-radius: 0.55rem;
   color: var(--muted-foreground);
-  font-size: 0.76rem;
-  font-weight: 570;
+  font-size: 0.8rem;
+  font-weight: 520;
   text-decoration: none;
-  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  transition: color 150ms ease, background 150ms ease, transform 100ms ease;
 }
 
-.control-nav a:hover {
-  background: var(--muted);
+.side-nav a:hover {
+  background: var(--accent);
   color: var(--foreground);
 }
 
-.control-nav a.active {
-  border-color: color-mix(in oklab, var(--primary) 18%, var(--border));
-  background: color-mix(in oklab, var(--primary) 9%, var(--card));
+.side-nav a:active {
+  transform: scale(0.985);
+}
+
+.side-nav a.active {
+  background: var(--secondary);
   color: var(--foreground);
-  box-shadow: inset 2px 0 0 var(--primary);
+  font-weight: 620;
 }
 
-.control-nav a.active > svg {
-  color: var(--primary);
+.side-nav a.active::before {
+  content: '';
+  position: absolute;
+  left: -0.8rem;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--foreground);
 }
 
-.control-nav a i {
-  width: 0.3rem;
-  height: 0.3rem;
-  border-radius: 50%;
-  background: transparent;
+.side-nav a.active > svg {
+  color: var(--foreground);
 }
 
-.control-nav a.active i {
-  background: var(--primary);
-}
-
-.control-sidebar-footer {
+.side-foot {
   display: grid;
-  gap: 0.3rem;
+  gap: 0.1rem;
   margin-top: auto;
-  padding-top: 1rem;
+  padding-top: 0.65rem;
   border-top: 1px solid var(--border);
 }
 
-.sidebar-health {
+.side-link {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  padding: 0.55rem 0.65rem 0.75rem;
-}
-
-.health-orbit {
-  width: 1.75rem;
-  height: 1.75rem;
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  border: 1px solid color-mix(in oklab, var(--primary) 30%, var(--border));
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--primary) 8%, transparent);
-}
-
-.health-orbit i {
-  width: 0.42rem;
-  height: 0.42rem;
-  border-radius: 50%;
-  background: var(--primary);
-  box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--primary) 12%, transparent);
-}
-
-.health-orbit.warn {
-  border-color: color-mix(in oklab, var(--destructive) 35%, var(--border));
-  background: color-mix(in oklab, var(--destructive) 9%, transparent);
-}
-
-.health-orbit.warn i {
-  background: var(--destructive);
-  box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--destructive) 12%, transparent);
-}
-
-.sidebar-health strong,
-.sidebar-health span {
-  display: block;
-}
-
-.sidebar-health strong {
-  font-size: 0.66rem;
-}
-
-.sidebar-health span {
-  margin-top: 0.14rem;
+  min-height: 2rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.6rem;
   color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.52rem;
-}
-
-.sidebar-external,
-.sidebar-logout {
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1rem 1fr auto;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: 2.1rem;
-  padding: 0.45rem 0.65rem;
-  border: 0;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-  text-align: left;
+  font-size: 0.74rem;
   text-decoration: none;
 }
 
-.sidebar-external:hover,
-.sidebar-logout:hover {
-  background: var(--muted);
+.side-link:hover {
+  background: var(--accent);
   color: var(--foreground);
 }
 
-.sidebar-logout:hover {
-  color: var(--destructive);
+.side-link svg:last-child {
+  margin-left: auto;
+  color: var(--muted-foreground);
 }
 
-.control-workspace {
+/* ---------- workspace / topbar ---------- */
+
+.workspace {
   min-width: 0;
-  overflow-x: clip;
+  display: flex;
+  flex-direction: column;
 }
 
-.control-topbar {
+.topbar {
   position: sticky;
-  z-index: 20;
+  z-index: 30;
   top: 0;
-  min-height: 3.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.6rem 1.5rem;
+  min-height: 3.4rem;
+  padding: 0.45rem 1.4rem;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in oklab, var(--background) 88%, transparent);
-  backdrop-filter: blur(16px);
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
-.control-breadcrumb {
+.topbar-context {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.55rem;
+}
+
+.topbar-context img {
+  display: none;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 0.4rem;
+}
+
+.topbar-title {
   color: var(--muted-foreground);
-  font-size: 0.68rem;
+  font-size: 0.76rem;
+  font-weight: 620;
 }
 
-.control-breadcrumb i {
-  color: var(--border);
-  font-style: normal;
-}
-
-.control-breadcrumb strong {
-  color: var(--foreground);
-  font-weight: 650;
-}
-
-.control-topbar-actions {
+.topbar-actions {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.5rem;
 }
 
-.topbar-status {
-  height: 1.95rem;
+.chip {
+  height: 1.7rem;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0 0.65rem;
-  border: 1px solid color-mix(in oklab, var(--primary) 20%, var(--border));
-  border-radius: 0.55rem;
-  background: color-mix(in oklab, var(--primary) 6%, transparent);
-  color: var(--primary);
-  font-size: 0.64rem;
-  font-weight: 650;
+  gap: 0.32rem;
+  padding: 0 0.58rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.66rem;
+  font-weight: 620;
+  white-space: nowrap;
 }
 
-.topbar-status.warn {
-  border-color: color-mix(in oklab, var(--destructive) 26%, var(--border));
-  background: color-mix(in oklab, var(--destructive) 7%, transparent);
+.chip i {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.chip-ok {
+  border-color: color-mix(in srgb, var(--success) 24%, transparent);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 7%, transparent);
+}
+
+.chip-bad {
+  border-color: color-mix(in srgb, var(--destructive) 24%, transparent);
   color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 7%, transparent);
 }
 
-.topbar-status.maintenance {
+.chip-warn {
+  border-color: color-mix(in srgb, var(--warning) 25%, transparent);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.icon-btn {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted-foreground);
+  transition: color 150ms ease, background 150ms ease, transform 100ms ease;
+}
+
+.icon-btn:hover {
   border-color: var(--border);
   background: var(--card);
-  color: var(--muted-foreground);
+  color: var(--foreground);
 }
 
-.topbar-status.maintenance.active {
-  border-color: color-mix(in oklab, #d49a35 30%, var(--border));
-  background: color-mix(in oklab, #d49a35 8%, transparent);
-  color: #9a6812;
+.icon-btn:active {
+  transform: scale(0.95);
 }
 
-:global(.dark) .topbar-status.maintenance.active {
-  color: #f0bd61;
-}
+/* ---------- content ---------- */
 
-.mobile-brand-group {
-  display: none;
-}
-
-.control-main {
-  width: min(100%, 94rem);
-  min-width: 0;
-  overflow-x: clip;
+.content {
+  flex: 1;
+  width: min(100%, 72rem);
   margin: 0 auto;
-  padding: clamp(1.4rem, 2.8vw, 2.75rem) clamp(1rem, 2.8vw, 2.75rem) 4rem;
+  padding: 2rem 1.6rem 3rem;
 }
 
-.control-page-heading {
+.page-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 2rem;
-  margin-bottom: 1.6rem;
-  padding-bottom: 1.35rem;
-  border-bottom: 1px solid var(--border);
+  gap: 1.5rem;
+  margin-bottom: 1.55rem;
 }
 
-.control-page-heading > div:first-child > span {
-  display: block;
-  margin-bottom: 0.45rem;
-  color: var(--primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.58rem;
-  font-weight: 720;
-  letter-spacing: 0.14em;
-}
-
-.control-page-heading h1 {
-  margin: 0;
-  color: var(--foreground);
-  font-size: clamp(1.65rem, 2.7vw, 2.2rem);
-  font-weight: 680;
-  letter-spacing: -0.045em;
-}
-
-.control-page-heading p {
-  margin: 0.45rem 0 0;
-  color: var(--muted-foreground);
-  font-size: 0.78rem;
-  line-height: 1.6;
-}
-
-.control-page-meta {
-  display: grid;
-  justify-items: end;
-  gap: 0.45rem;
+.page-heading {
   min-width: 0;
 }
 
-.control-page-meta > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+.page-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--muted-foreground);
   font-size: 0.62rem;
   font-weight: 650;
+  letter-spacing: 0.13em;
 }
 
-.control-page-meta > span.warn {
-  color: var(--destructive);
+.page-head h1 {
+  margin: 0;
+  font-size: clamp(1.65rem, 3vw, 2rem);
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
 }
 
-.control-page-meta i {
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 0.2rem color-mix(in oklab, currentColor 12%, transparent);
+.page-description {
+  margin: 0.42rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.76rem;
 }
 
-.control-page-meta small {
+.page-meta {
+  display: grid;
+  justify-items: end;
+  gap: 0.28rem;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+
+.page-meta > span {
+  font-size: 0.62rem;
+  font-weight: 620;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.page-meta small {
   max-width: 20rem;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.58rem;
+  font-size: 0.66rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.control-alert {
-  margin-bottom: 1rem;
+.page-alert {
+  margin-bottom: 0.9rem;
 }
 
-.control-alert :deep([data-slot='alert-description']) {
+.page-alert :deep([data-slot='alert-description']) {
   color: inherit;
 }
 
-.control-view {
+.view {
   min-width: 0;
+  animation: view-in 0.2s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.overview-shell-grid {
-  display: grid;
-  gap: 1rem;
-  animation: control-view-enter 0.2s ease-out both;
+@keyframes view-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-.overview-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.8rem;
-}
+/* ---------- mobile bottom tab bar ---------- */
 
-.overview-stat-card,
-.overview-quick-card {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-  background: var(--card);
-  box-shadow: 0 0.4rem 1.5rem color-mix(in oklab, var(--foreground) 4%, transparent);
-}
-
-.overview-stat-card {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 0.35rem 0.65rem;
-  padding: 1rem;
-}
-
-.overview-stat-icon {
-  grid-row: 1 / 3;
-  width: 2.2rem;
-  height: 2.2rem;
-  display: grid;
-  place-items: center;
-  border-radius: 0.6rem;
-  background: color-mix(in oklab, var(--primary) 12%, var(--card));
-  color: var(--primary);
-}
-
-.overview-stat-icon.violet {
-  background: color-mix(in oklab, #8c84b8 13%, var(--card));
-  color: #8c84b8;
-}
-
-.overview-stat-icon.amber {
-  background: color-mix(in oklab, #d49578 13%, var(--card));
-  color: #c57d5b;
-}
-
-.overview-stat-icon.blue {
-  background: color-mix(in oklab, #6b9eb4 13%, var(--card));
-  color: #5c90a8;
-}
-
-.overview-stat-card > span {
-  color: var(--muted-foreground);
-  font-size: 0.65rem;
-}
-
-.overview-stat-card > strong {
-  color: var(--foreground);
-  font-size: 1.05rem;
-  letter-spacing: -0.025em;
-}
-
-.overview-stat-card > small,
-.overview-rate-pair {
-  grid-column: 1 / -1;
-  color: var(--muted-foreground);
-  font-size: 0.58rem;
-}
-
-.overview-stat-track {
-  grid-column: 1 / -1;
-  height: 0.22rem;
-  overflow: hidden;
-  margin-top: 0.45rem;
-  border-radius: 2rem;
-  background: var(--muted);
-}
-
-.overview-stat-track i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--primary);
-}
-
-.overview-stat-track.violet i { background: #8c84b8; }
-.overview-stat-track.amber i { background: #d49578; }
-
-.overview-rate-pair {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-.overview-rate-pair small {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  color: var(--muted-foreground);
-}
-
-.overview-visual-card {
-  min-height: 17rem;
-  display: grid;
-  grid-template-columns: minmax(13rem, .65fr) minmax(18rem, 1.35fr);
-  align-items: center;
-  overflow: hidden;
-  padding: 1.25rem 1.4rem;
-  border: 1px solid var(--border);
-  border-radius: .9rem;
-  background: linear-gradient(120deg, color-mix(in oklab, var(--primary) 8%, var(--card)), var(--card) 55%);
-}
-
-.overview-visual-copy span {
-  color: var(--primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: .58rem;
-  font-weight: 720;
-  letter-spacing: .14em;
-}
-
-.overview-visual-copy h2 { margin: .42rem 0 0; font-size: 1.15rem; }
-.overview-visual-copy p { max-width: 24rem; margin: .4rem 0 0; font-size: .72rem; line-height: 1.6; }
-.overview-visual-card :deep(.hairline-figure) { min-height: 15rem; }
-
-.overview-quick-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.8rem;
-}
-
-.overview-quick-card {
-  display: flex;
-  flex-direction: column;
-  min-height: 15rem;
-  padding: 1.15rem;
-}
-
-.overview-quick-card > div:first-child > span {
-  color: var(--primary);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.54rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-.overview-quick-card h2 {
-  margin: 0.35rem 0 0;
-  color: var(--foreground);
-  font-size: 1rem;
-}
-
-.overview-protocol-list {
-  display: grid;
-  gap: 0.55rem;
-  margin: 1.1rem 0;
-}
-
-.overview-protocol-list > div {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.7rem;
-  border: 1px solid var(--border);
-  border-radius: 0.62rem;
-  background: var(--background);
-}
-
-.overview-protocol-list i {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-}
-
-.overview-protocol-list i.active {
-  background: var(--primary);
-  box-shadow: 0 0 0 0.2rem color-mix(in oklab, var(--primary) 12%, transparent);
-}
-
-.overview-protocol-list strong,
-.overview-protocol-list small,
-.overview-traffic-total strong,
-.overview-traffic-total small,
-.overview-health-readout strong,
-.overview-health-readout small {
-  display: block;
-}
-
-.overview-protocol-list strong {
-  color: var(--foreground);
-  font-size: 0.7rem;
-}
-
-.overview-protocol-list small,
-.overview-traffic-total small,
-.overview-health-readout small {
-  margin-top: 0.18rem;
-  color: var(--muted-foreground);
-  font-size: 0.58rem;
-}
-
-.overview-protocol-list em {
-  color: var(--muted-foreground);
-  font-size: 0.58rem;
-  font-style: normal;
-}
-
-.overview-traffic-total,
-.overview-health-readout {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin: auto 0;
-  padding: 1rem;
-  border-radius: 0.7rem;
-  background: var(--muted);
-  color: var(--primary);
-}
-
-.overview-traffic-total strong,
-.overview-health-readout strong {
-  color: var(--foreground);
-  font-size: 1.05rem;
-}
-
-.overview-quick-card > button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.55rem;
-  background: transparent;
-  color: var(--foreground);
-  font-size: 0.66rem;
-  font-weight: 650;
-}
-
-.overview-quick-card > button:hover {
-  border-color: color-mix(in oklab, var(--primary) 35%, var(--border));
-  background: color-mix(in oklab, var(--primary) 7%, transparent);
-  color: var(--primary);
-}
-
-.control-view[data-section='traffic'] :deep(.welcome-card) {
+.tabbar {
   display: none;
 }
 
-.control-view :deep(.view-stack),
-.control-view :deep(.settings-grid) {
-  animation: control-view-enter 0.2s ease-out both;
-}
-
-.mobile-nav-sheet {
-  width: min(22rem, 88vw) !important;
-  gap: 0 !important;
-  padding: 0 !important;
-}
-
-.mobile-sheet-header {
-  padding: 1.2rem 1rem !important;
-  border-bottom: 1px solid var(--border);
-}
-
-.mobile-sheet-title {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.mobile-sheet-nav {
-  display: grid;
-  gap: 0.25rem;
-  padding: 0.8rem;
-}
-
-.mobile-sheet-nav a {
-  display: grid;
-  grid-template-columns: 1.3rem 1fr;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.7rem;
-  border: 1px solid transparent;
-  border-radius: 0.65rem;
-  color: var(--muted-foreground);
-  text-decoration: none;
-}
-
-.mobile-sheet-nav a.active {
-  border-color: color-mix(in oklab, var(--primary) 20%, var(--border));
-  background: color-mix(in oklab, var(--primary) 8%, transparent);
-  color: var(--foreground);
-}
-
-.mobile-sheet-nav a.active > svg {
-  color: var(--primary);
-}
-
-.mobile-sheet-nav strong,
-.mobile-sheet-nav small {
-  display: block;
-}
-
-.mobile-sheet-nav strong {
-  font-size: 0.78rem;
-}
-
-.mobile-sheet-nav small {
-  margin-top: 0.2rem;
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
-  line-height: 1.35;
-}
-
-.mobile-sheet-footer {
-  display: grid;
-  gap: 0.65rem;
-  margin-top: auto;
-  padding: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.mobile-panel-address {
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.65rem;
-  background: var(--muted);
-}
-
-.mobile-panel-address span,
-.mobile-panel-address strong {
-  display: block;
-}
-
-.mobile-panel-address span {
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
-}
-
-.mobile-panel-address strong {
-  margin-top: 0.25rem;
-  overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 0.66rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.mobile-sheet-footer > a,
-.mobile-sheet-footer > button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.7rem;
-  border: 0;
-  border-radius: 0.55rem;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 0.72rem;
-  text-align: left;
-  text-decoration: none;
-}
-
-.mobile-sheet-footer > a svg:last-child {
-  margin-left: auto;
-}
-
-.mobile-sheet-footer > a:hover,
-.mobile-sheet-footer > button:hover {
-  background: var(--muted);
-  color: var(--foreground);
-}
-
-.mobile-sheet-footer > button:hover {
-  color: var(--destructive);
-}
-
-@keyframes control-view-enter {
-  from { opacity: 0; transform: translateY(0.25rem); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@media (max-width: 1100px) {
-  .overview-stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .overview-visual-card {
-    grid-template-columns: 1fr;
-  }
-
-  .overview-visual-copy {
-    text-align: center;
-  }
-
-  .overview-visual-copy p {
-    margin-inline: auto;
-  }
-
-  .overview-quick-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .overview-quick-card {
-    min-height: 12rem;
-  }
-}
-
 @media (max-width: 900px) {
-  .control-shell {
+  .shell {
     display: block;
   }
 
-  .control-sidebar {
+  .sidebar {
     display: none;
   }
 
-  .control-topbar {
-    padding-inline: 0.85rem;
+  .topbar {
+    padding-inline: 0.9rem;
   }
 
-  .mobile-brand-group {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
+  .topbar-context img {
+    display: block;
   }
 
-  .mobile-menu-button {
-    width: 2rem;
-    height: 2rem;
-  }
-
-  .mobile-control-brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
+  .topbar-title {
+    display: block;
     color: var(--foreground);
-    font-size: 0.75rem;
+  }
+
+  .content {
+    padding: 1.5rem 0.9rem calc(5.2rem + env(safe-area-inset-bottom));
+  }
+
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .page-meta {
+    justify-items: start;
+  }
+
+  .page-meta small {
+    max-width: 100%;
+  }
+
+  .tabbar {
+    position: fixed;
+    z-index: 40;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    padding: 0.35rem 0.55rem calc(0.35rem + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--card) 90%, transparent);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+  }
+
+  .tabbar a {
+    display: grid;
+    justify-items: center;
+    gap: 0.14rem;
+    min-width: 0;
+    padding: 0.32rem 0;
+    border-radius: 0.5rem;
+    color: var(--muted-foreground);
+    font-size: 0.6rem;
+    font-weight: 520;
     text-decoration: none;
+    transition: color 150ms ease, background 150ms ease, transform 100ms ease;
   }
 
-  .mobile-control-brand img {
-    width: 1.75rem;
-    height: 1.75rem;
+  .tabbar a:active {
+    transform: scale(0.96);
   }
 
-  .control-breadcrumb {
-    display: none;
-  }
-
-  .control-main {
-    padding-top: 1.5rem;
+  .tabbar a.active {
+    background: var(--secondary);
+    color: var(--foreground);
+    font-weight: 620;
   }
 }
 
 @media (max-width: 600px) {
-  .overview-stat-grid {
-    grid-template-columns: 1fr;
+  .content {
+    padding-inline: 0.8rem;
   }
 
-  .overview-visual-card {
-    min-height: auto;
-    display: grid;
-    grid-template-columns: minmax(7rem, .65fr) minmax(0, 1.35fr);
-    padding: .85rem;
+  .page-head {
+    margin-bottom: 1.25rem;
   }
 
-  .overview-visual-card :deep(.hairline-figure) {
-    min-height: 11rem;
+  .page-description {
+    max-width: 28rem;
   }
 
-  .control-topbar {
-    min-height: 3.25rem;
-    gap: 0.5rem;
-  }
-
-  .mobile-control-brand strong {
+  .chip span {
     display: none;
   }
 
-  .topbar-status {
-    width: 1.9rem;
-    padding: 0;
-    justify-content: center;
+  .chip {
+    padding: 0 0.55rem;
+  }
+}
+
+@media (max-width: 390px) {
+  .topbar {
+    gap: 0.45rem;
+    padding-inline: 0.65rem;
   }
 
-  .topbar-status span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
+  .topbar-context {
+    gap: 0.4rem;
   }
 
-  .control-topbar-actions {
+  .topbar-title {
+    font-size: 0.72rem;
+  }
+
+  .topbar-actions {
     gap: 0.25rem;
   }
 
-  .control-page-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.85rem;
+  .chip {
+    height: 1.65rem;
+    padding-inline: 0.45rem;
   }
 
-  .control-page-meta {
-    width: 100%;
-    align-items: center;
-    grid-template-columns: auto minmax(0, 1fr);
-    justify-items: start;
-  }
-
-  .control-page-meta small {
-    width: 100%;
-    max-width: 100%;
-    overflow: hidden;
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .overview-rate-pair {
-    align-items: flex-start;
-    flex-direction: column;
+  .content {
+    padding-inline: 0.65rem;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .control-view :deep(.view-stack),
-  .control-view :deep(.settings-grid) {
+  .view {
     animation: none;
   }
 }

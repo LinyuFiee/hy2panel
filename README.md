@@ -8,8 +8,8 @@
 
 ## 功能
 
-- 基于 shadcn-vue / Reka UI 的五区控制台、亮色/暗色/跟随系统主题与移动 Sheet 导航
-- Hairline 风格的 6U 服务器机架、配线端口和数据传输路径互动视觉
+- 基于 shadcn-vue / Reka UI 的五区控制台、亮色/暗色/跟随系统主题与移动端底部导航
+- 直接集成 Hairline 互动线稿，并提供项目自有的 Reality / Hysteria2 协议路径示意
 - VLESS Reality Vision 与 Hysteria2 配置、按需显示的客户端链接和本地二维码
 - Reality / Hysteria2 实时速率、累计有效载荷、活动代理流与最多 7 天分钟趋势
 - 无法安全归类的代理流量单列为「未归属」
@@ -75,7 +75,7 @@ curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/boo
 默认安装最新稳定 Release。固定面板版本时，bootstrap 只接受完整标签：
 
 ```bash
-export HY2PANEL_VERSION="v0.6.0"
+export HY2PANEL_VERSION="v0.6.1"
 ```
 
 可选的 `SING_BOX_VERSION` 必须是 bundle 中 `packaging/sing-box-versions.json` allowlist 的**精确版本**；任意版本、部分版本和未知版本都会被拒绝：
@@ -86,7 +86,7 @@ export SING_BOX_VERSION="1.14.4"
 
 allowlist 同时固定官方资产名称、字节数和 SHA-256。未指定时安装清单中唯一标为 `recommended` 的版本。
 
-v0.6 的控制台采用 shadcn-vue / Reka UI 设计原语、Tailwind CSS v4 语义主题和项目内 Hairline 风格服务器机架 SVG。它支持亮色、暗色与跟随系统三种模式；主题偏好只保存在当前浏览器，不会发送到服务器。
+v0.6 的控制台采用 shadcn-vue / Reka UI 设计原语、Tailwind CSS v4 语义主题和 `@lucasmarkes/hairline` 官方互动图形；项目自有的协议拓扑则单独展示 Reality、Hysteria2 与普通数据路径，两者均为交互示意而非实时连接拓扑。控制台支持亮色、暗色与跟随系统三种模式；主题偏好只保存在当前浏览器，不会发送到服务器。
 
 ## 协议流量口径
 
@@ -194,10 +194,10 @@ cat /etc/hy2panel/upgrade.result
 
 v0.5 的 bundle 与维护脚本新增事务库、`hy2`、备份/恢复/卸载、sing-box allowlist 和恢复单元。v0.4.x 已安装的旧升级脚本不知道这些文件，**不要直接用旧面板的一键更新跨到 v0.5**。
 
-在服务器上先备份 `/etc/hy2panel`、`/root/hy2panel-credentials` 和证书，最好再创建 VPS 快照。然后从目标 v0.5.x Release 下载 bundle 内的自包含迁移器并执行：
+在服务器上先备份 `/etc/hy2panel`、`/root/hy2panel-credentials` 和证书，最好再创建 VPS 快照。然后从当前稳定 Release 下载 bundle 内的自包含迁移器并执行：
 
 ```bash
-curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.6.0/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
+curl -fsSL "https://github.com/LinyuFiee/hy2panel/releases/download/v0.6.1/migrate-v04-to-v05.sh" -o /tmp/migrate-v04-to-v05.sh
 bash /tmp/migrate-v04-to-v05.sh
 ```
 
@@ -280,7 +280,7 @@ systemd-analyze verify systemd/*.path systemd/*.service systemd/*.timer
 
 ## 发布
 
-v0.5 发布标签使用 `v0.5.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
+v0.6 发布标签使用 `v0.6.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
 
 ```text
 hy2panel-bundle-linux-amd64.tar.gz
@@ -288,12 +288,12 @@ hy2panel-bundle-linux-amd64.tar.gz.sha256
 migrate-v04-to-v05.sh
 ```
 
-bundle 包含 Linux 二进制、全部安装/维护脚本、事务库、sing-box 清单和当前 systemd 单元，不再包含旧 firewall 单元。GitHub 环境支持时还会为 bundle 生成 artifact attestation。
+bundle 包含 Linux 二进制、全部安装/维护脚本、事务库、sing-box 清单、第三方许可声明和当前 systemd 单元，不再包含旧 firewall 单元。GitHub 环境支持时还会为 bundle 生成 artifact attestation。
 
 ## 第三方项目
 
 - [sing-box](https://github.com/SagerNet/sing-box)：GPL-3.0-or-later（另有上游名称/关联声明限制）；安装器按 allowlist 下载官方二进制，不重打包进 hy2panel bundle
-- [Hairline](https://github.com/lucasmarkes/hairline)：MIT，指针互动线条图形
+- [Hairline](https://github.com/lucasmarkes/hairline)：MIT，登录、链路与空状态中的官方互动线稿；协议路径图为 hy2panel 自有实现
 - [LibreSpeed CLI](https://github.com/librespeed/speedtest-cli)：LGPL-3.0，按需服务器测速
 - [Lucide](https://github.com/lucide-icons/lucide)：ISC，界面图标
 

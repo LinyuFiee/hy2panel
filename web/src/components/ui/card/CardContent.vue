@@ -4,5 +4,5 @@ const props = defineProps({ class: { type: [String, Array, Object], default: und
 </script>
 
 <template>
-  <div data-slot="card-content" :class="cn('px-6', props.class)"><slot /></div>
+  <div data-slot="card-content" :class="cn('px-5 py-4', props.class)"><slot /></div>
 </template>

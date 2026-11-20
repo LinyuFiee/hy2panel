@@ -123,6 +123,7 @@ jobs:
           bash scripts/tests/checksum-format.sh
           bash scripts/tests/line-endings.sh
           bash scripts/tests/install-permissions.sh
+          bash scripts/tests/migration-target.sh
 
       - name: Verify every systemd unit
         shell: bash

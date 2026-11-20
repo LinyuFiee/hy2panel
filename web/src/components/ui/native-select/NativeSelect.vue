@@ -27,7 +27,7 @@ function onChange(event) {
       v-bind="attrs"
       :value="value"
       data-slot="native-select"
-      :class="cn('h-9 w-full min-w-24 appearance-none rounded-md border border-input bg-transparent py-1 pl-3 pr-8 text-sm shadow-xs transition-[color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed data-[size=sm]:h-8 data-[size=sm]:py-0 dark:bg-input/30 aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/20 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50', props.class)"
+      :class="cn('h-9 w-full min-w-24 appearance-none rounded-md border border-input bg-card py-1 pl-3 pr-8 text-sm shadow-none transition-[color,border-color,box-shadow] outline-none disabled:pointer-events-none disabled:cursor-not-allowed data-[size=sm]:h-8 data-[size=sm]:py-0 dark:bg-card aria-invalid:border-destructive aria-invalid:ring-[3px] aria-invalid:ring-destructive/15 focus-visible:border-foreground/30 focus-visible:ring-[3px] focus-visible:ring-ring/20', props.class)"
       :data-size="size"
       @change="onChange"
     >

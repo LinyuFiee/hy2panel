@@ -6,76 +6,84 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: oklch(0.985 0.004 155);
-  --foreground: oklch(0.255 0.025 155);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.255 0.025 155);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.255 0.025 155);
-  --primary: oklch(0.56 0.09 160);
-  --primary-foreground: oklch(0.985 0.005 155);
-  --secondary: oklch(0.955 0.015 155);
-  --secondary-foreground: oklch(0.34 0.045 158);
-  --muted: oklch(0.955 0.01 155);
-  --muted-foreground: oklch(0.52 0.025 155);
-  --accent: oklch(0.94 0.025 155);
-  --accent-foreground: oklch(0.34 0.045 158);
-  --destructive: oklch(0.58 0.19 25);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.9 0.015 155);
-  --input: oklch(0.9 0.015 155);
-  --ring: oklch(0.62 0.09 160);
-  --chart-1: oklch(0.61 0.11 160);
-  --chart-2: oklch(0.64 0.1 285);
-  --chart-3: oklch(0.7 0.11 65);
-  --chart-4: oklch(0.68 0.09 220);
-  --chart-5: oklch(0.6 0.12 25);
-  --hairline-plate: #edf5f0;
-  --hairline-hi: #ffffff;
-  --hairline-edge: #4f8977;
-  --hairline-mid: #9bc3b4;
-  --hairline-lo: #dceae2;
-  --hairline-stroke: 1;
+  --background: #f7f7f6;
+  --foreground: #101010;
+  --card: #ffffff;
+  --card-foreground: #101010;
+  --popover: #ffffff;
+  --popover-foreground: #101010;
+  --primary: #111111;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0ef;
+  --secondary-foreground: #171717;
+  --muted: #f4f4f3;
+  --muted-foreground: #61615e;
+  --accent: #eeeeec;
+  --accent-foreground: #111111;
+  --destructive: #c72f2f;
+  --destructive-foreground: #ffffff;
+  --success: #137a4b;
+  --warning: #874d00;
+  --border: rgba(16, 16, 16, 0.09);
+  --input: rgba(16, 16, 16, 0.15);
+  --ring: rgba(17, 17, 17, 0.34);
+  --chart-1: #2563eb;
+  --chart-2: #139967;
+  --chart-3: #7157c8;
+  --chart-4: #c7771a;
+  --chart-5: #c73c3c;
+  --hairline-plate: #ffffff;
+  --hairline-hi: #171719;
+  --hairline-edge: #8c8c91;
+  --hairline-mid: #bebec2;
+  --hairline-lo: #e3e3e5;
+  --hairline-stroke: 0.9;
   --radius: 0.75rem;
+  --shadow-card: 0 1px 1px rgba(16, 16, 16, 0.025), 0 5px 18px rgba(16, 16, 16, 0.025);
+  --shadow-float: 0 16px 44px rgba(16, 16, 16, 0.14);
   color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.18 0.018 155);
-  --foreground: oklch(0.94 0.008 155);
-  --card: oklch(0.22 0.018 155);
-  --card-foreground: oklch(0.94 0.008 155);
-  --popover: oklch(0.22 0.018 155);
-  --popover-foreground: oklch(0.94 0.008 155);
-  --primary: oklch(0.72 0.11 160);
-  --primary-foreground: oklch(0.18 0.02 155);
-  --secondary: oklch(0.28 0.02 155);
-  --secondary-foreground: oklch(0.94 0.008 155);
-  --muted: oklch(0.27 0.017 155);
-  --muted-foreground: oklch(0.7 0.018 155);
-  --accent: oklch(0.31 0.035 158);
-  --accent-foreground: oklch(0.94 0.008 155);
-  --destructive: oklch(0.68 0.19 24);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.65 0.09 160);
-  --chart-1: oklch(0.7 0.12 160);
-  --chart-2: oklch(0.72 0.11 285);
-  --chart-3: oklch(0.76 0.12 65);
-  --chart-4: oklch(0.72 0.1 220);
-  --chart-5: oklch(0.7 0.15 25);
-  --hairline-plate: #101814;
-  --hairline-hi: #dff7ec;
-  --hairline-edge: #79b69e;
-  --hairline-mid: #4f7e6c;
-  --hairline-lo: #21372e;
-  --hairline-stroke: 1;
+  --background: #0b0b0c;
+  --foreground: #f1f1f0;
+  --card: #121213;
+  --card-foreground: #f1f1f0;
+  --popover: #181819;
+  --popover-foreground: #f1f1f0;
+  --primary: #f2f2f1;
+  --primary-foreground: #111112;
+  --secondary: #202022;
+  --secondary-foreground: #eeeeed;
+  --muted: #181819;
+  --muted-foreground: #aaaaa5;
+  --accent: #242426;
+  --accent-foreground: #f3f3f2;
+  --destructive: #f0635f;
+  --destructive-foreground: #170707;
+  --success: #43c982;
+  --warning: #e4a54c;
+  --border: rgba(255, 255, 255, 0.105);
+  --input: rgba(255, 255, 255, 0.16);
+  --ring: rgba(255, 255, 255, 0.36);
+  --chart-1: #6c9cff;
+  --chart-2: #48cf91;
+  --chart-3: #a891ee;
+  --chart-4: #e6a04d;
+  --chart-5: #f16a66;
+  --hairline-plate: #121213;
+  --hairline-hi: #e6e6e8;
+  --hairline-edge: #77777d;
+  --hairline-mid: #49494e;
+  --hairline-lo: #28282b;
+  --hairline-stroke: 0.9;
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.01);
+  --shadow-float: 0 16px 48px rgba(0, 0, 0, 0.58);
   color-scheme: dark;
 }
 
 @theme inline {
-  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -92,6 +100,8 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -100,10 +110,11 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: calc(var(--radius) - 5px);
+  --radius-md: calc(var(--radius) - 3px);
+  --radius-lg: calc(var(--radius) - 1px);
+  --radius-xl: var(--radius);
+  --radius-2xl: calc(var(--radius) + 4px);
 }
 
 @layer base {
@@ -125,7 +136,11 @@
     min-height: 100vh;
     background: var(--background);
     color: var(--foreground);
+    font-family: var(--font-sans);
     font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
 
   button,
@@ -141,9 +156,9 @@
     --line: var(--border);
     --mint: var(--primary);
     --mint-dark: var(--primary);
-    --mint-soft: var(--accent);
-    --lavender: var(--chart-2);
-    --peach: var(--chart-3);
+    --mint-soft: var(--secondary);
+    --lavender: var(--chart-3);
+    --peach: var(--chart-4);
     --red: var(--destructive);
   }
 
@@ -151,6 +166,7 @@
   h2,
   h3 {
     color: var(--foreground);
+    letter-spacing: -0.026em;
   }
 
   p {
@@ -158,7 +174,7 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--primary) 28%, transparent);
+    background: color-mix(in srgb, var(--chart-1) 22%, transparent);
     color: var(--foreground);
   }
 
@@ -184,6 +200,90 @@
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]) {
     cursor: pointer;
+  }
+
+  button {
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.012em;
+  }
+
+  .mono {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+
+  :focus-visible {
+    outline: 1.5px solid color-mix(in srgb, var(--foreground) 55%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+/* Reka portal/content styling needs to remain global. */
+button[role='switch'][data-state='checked'] {
+  background: var(--success);
+}
+
+.theme-toggle-group,
+.range-group {
+  padding: 2px;
+  gap: 1px;
+  border: 1px solid var(--border) !important;
+  border-radius: 0.625rem !important;
+  background: var(--muted) !important;
+  box-shadow: none !important;
+}
+
+.theme-toggle-item,
+.range-item {
+  min-width: 2rem;
+  border: 0 !important;
+  border-radius: 0.45rem !important;
+  background: transparent !important;
+  color: var(--muted-foreground);
+  box-shadow: none !important;
+  font-size: 0.7rem;
+  transition: color 150ms ease, background 150ms ease, transform 100ms ease;
+}
+
+.theme-toggle-item:hover,
+.range-item:hover {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+
+.theme-toggle-item:active,
+.range-item:active {
+  transform: scale(0.96);
+}
+
+.theme-toggle-item[data-state='on'],
+.range-item[data-state='on'] {
+  background: var(--card) !important;
+  color: var(--foreground) !important;
+  font-weight: 620;
+  box-shadow: 0 1px 3px rgba(16, 16, 16, 0.08) !important;
+}
+
+.is-compact .theme-toggle-item {
+  width: 1.875rem;
+  min-width: 1.875rem;
+  height: 1.75rem;
+  padding: 0;
+}
+
+@media (max-width: 620px) {
+  .range-group {
+    width: 100%;
+  }
+
+  .range-item {
+    min-width: 0;
+    flex: 1;
   }
 }
 
