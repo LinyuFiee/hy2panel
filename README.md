@@ -139,7 +139,7 @@ hy2 update
 面板 UI 的「系统设置 → 面板更新」先从 GitHub 最新稳定 Release 取得精确目标版本，再提交含该版本的升级请求。服务器只下载 `v目标版本` 的固定 bundle 与 `.sha256`，并验证包内二进制报告的版本完全一致。
 
 ```bash
-hy2 update    # 交互输入目标版本，例如 0.6.1
+hy2 update    # 交互输入目标版本，例如 0.7.0
 ```
 
 升级流程：预检下载和校验 → 记录受管文件/单元快照 → 安装新文件 → 配置迁移与渲染 → 重启核心和面板 → 健康检查 → 提交。配置、二进制、脚本和 systemd 单元在同一维护锁内处理，失败时尝试恢复快照。`/etc/hy2panel/panel.json` 不会被新包覆盖，域名、UUID、密钥、密码与 RackNerd 凭据会保留。
@@ -236,7 +236,7 @@ systemd-analyze verify systemd/*.path systemd/*.service systemd/*.timer
 
 ## 发布
 
-发布标签使用 `v0.6.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
+发布标签使用 `v0.7.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
 
 ```text
 hy2panel-bundle-linux-amd64.tar.gz
