@@ -17,7 +17,10 @@ const DEFAULT_FORM = {
     domain: '',
     password: '',
     up_mbps: 100,
-    down_mbps: 100
+    down_mbps: 100,
+    bbr_profile: 'standard',
+    obfs_type: '',
+    obfs_password: ''
   }
 }
 
@@ -76,9 +79,19 @@ export function useNodeDraft() {
     return conflict.value ? 'conflict' : 'preserved'
   }
 
-  function payload() {
-    return clone(form)
-  }
+function toNumber(value) {
+  const text = String(value ?? '').trim()
+  return text === '' ? 0 : Number(text)
+}
+
+function payload() {
+  const draft = clone(form)
+  draft.reality.port = toNumber(draft.reality.port)
+  draft.hysteria2.port = toNumber(draft.hysteria2.port)
+  draft.hysteria2.up_mbps = toNumber(draft.hysteria2.up_mbps)
+  draft.hysteria2.down_mbps = toNumber(draft.hysteria2.down_mbps)
+  return draft
+}
 
   function reset() {
     replaceForm(clone(DEFAULT_FORM))

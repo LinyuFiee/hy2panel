@@ -71,6 +71,7 @@ func redactSecrets(value string, cfg *config.Config) string {
 		cfg.Reality.PublicKey,
 		cfg.Reality.ShortID,
 		cfg.Hysteria2.Password,
+		cfg.Hysteria2.ObfsPassword,
 	}
 	for _, secret := range secrets {
 		if len(secret) >= 6 {

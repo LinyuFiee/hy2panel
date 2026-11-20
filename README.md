@@ -86,6 +86,17 @@ export SING_BOX_VERSION="1.14.4"
 
 未指定时安装清单中唯一标为 `recommended` 的版本。allowlist 同时固定官方资产名称、字节数和 SHA-256。
 
+## Hysteria2 调优
+
+「节点 → 高级认证与带宽」提供四项设置：
+
+- **不限速**：不向 sing-box 声明带宽，由客户端拥塞控制自行探测。链路远高于默认的 100 Mbps 时开启可解除上限。
+- **上传 / 下载 Mbps**：仅作为拥塞控制的目标提示，不是限速开关。填略高于实测链路的数值，填过大会加剧拥塞。
+- **BBR 拥塞档位**：`conservative` / `standard`（默认）/ `aggressive`。高丢包链路可尝试 `aggressive`。
+- **QUIC 混淆**：`salamander` / `gecko`。把 QUIC 流量伪装成随机 UDP，可缓解运营商对 UDP 的限速。开启后客户端必须填写相同的混淆密码，旧客户端会立即断连。
+
+混淆密码属于凭据，会进入客户端链接、二维码和备份，日志输出中会被脱敏。以上参数只影响 Hysteria2；Reality 走 TCP，由 BBR 和系统内核参数决定。
+
 ## 协议流量口径
 
 「协议流量」来自 sing-box 本机 Clash API 的全局计数与活动连接快照，经本地采样后归类：
@@ -139,7 +150,7 @@ hy2 update
 面板 UI 的「系统设置 → 面板更新」先从 GitHub 最新稳定 Release 取得精确目标版本，再提交含该版本的升级请求。服务器只下载 `v目标版本` 的固定 bundle 与 `.sha256`，并验证包内二进制报告的版本完全一致。
 
 ```bash
-hy2 update    # 交互输入目标版本，例如 0.7.1
+hy2 update    # 交互输入目标版本，例如 0.8.0
 ```
 
 升级流程：预检下载和校验 → 记录受管文件/单元快照 → 安装新文件 → 配置迁移与渲染 → 重启核心和面板 → 健康检查 → 提交。配置、二进制、脚本和 systemd 单元在同一维护锁内处理，失败时尝试恢复快照。`/etc/hy2panel/panel.json` 不会被新包覆盖，域名、UUID、密钥、密码与 RackNerd 凭据会保留。
@@ -238,7 +249,7 @@ systemd-analyze verify systemd/*.path systemd/*.service systemd/*.timer
 
 ## 发布
 
-发布标签使用 `v0.7.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
+发布标签使用 `v0.8.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
 
 ```text
 hy2panel-bundle-linux-amd64.tar.gz

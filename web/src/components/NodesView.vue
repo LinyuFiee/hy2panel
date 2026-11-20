@@ -43,6 +43,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
@@ -63,6 +64,7 @@ const realityAdvancedOpen = ref(false)
 const hysteriaAdvancedOpen = ref(false)
 const showRealityPrivateKey = ref(false)
 const showHysteriaPassword = ref(false)
+const showObfsPassword = ref(false)
 const disableDialogOpen = ref(false)
 const pendingDisable = ref('')
 const credentialDialogOpen = ref(false)
@@ -95,6 +97,44 @@ function trimField(target, key) {
 function updateNumber(target, key, value) {
   const text = String(value ?? '').trim()
   target[key] = text === '' ? '' : Number(text)
+}
+
+const unlimitedBandwidth = computed(() => formBandwidthUnlimited())
+
+function formBandwidthUnlimited() {
+  const hysteria = props.form?.hysteria2
+  if (!hysteria) return false
+  return hysteria.up_mbps === 0 && hysteria.down_mbps === 0
+}
+
+function setUnlimitedBandwidth(value) {
+  const hysteria = props.form.hysteria2
+  if (value === true) {
+    hysteria.up_mbps = 0
+    hysteria.down_mbps = 0
+    return
+  }
+  if (hysteria.up_mbps === 0) hysteria.up_mbps = 100
+  if (hysteria.down_mbps === 0) hysteria.down_mbps = 100
+}
+
+function randomObfsPassword() {
+  const bytes = new Uint8Array(18)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function setObfsType(value) {
+  const hysteria = props.form.hysteria2
+  hysteria.obfs_type = value
+  if (!value) {
+    hysteria.obfs_password = ''
+    showObfsPassword.value = false
+    return
+  }
+  if (!hysteria.obfs_password) {
+    hysteria.obfs_password = randomObfsPassword()
+  }
 }
 
 function requestProtocolToggle(protocol, nextValue) {
@@ -178,6 +218,7 @@ function handleSubmit() {
   if (saveDisabled.value) return
   showRealityPrivateKey.value = false
   showHysteriaPassword.value = false
+  showObfsPassword.value = false
   emit('save')
 }
 
@@ -195,13 +236,17 @@ watch(realityAdvancedOpen, open => {
 })
 
 watch(hysteriaAdvancedOpen, open => {
-  if (!open) showHysteriaPassword.value = false
+  if (!open) {
+    showHysteriaPassword.value = false
+    showObfsPassword.value = false
+  }
 })
 
 watch(() => props.saving, saving => {
   if (!saving) return
   showRealityPrivateKey.value = false
   showHysteriaPassword.value = false
+  showObfsPassword.value = false
   if (credentialDialogOpen.value) handleCredentialDialog(false)
 })
 
@@ -374,14 +419,47 @@ onBeforeUnmount(invalidateQr)
                     <FieldDescription class="danger-help">密码会进入客户端链接，只分享给受信任设备。</FieldDescription>
                   </Field>
                   <Field class="field">
+                    <FieldLabel for="hysteria-unlimited">不限速</FieldLabel>
+                    <Switch id="hysteria-unlimited" :model-value="unlimitedBandwidth" :disabled="saving || !form.hysteria2.enabled" aria-label="Hysteria2 不限速" @update:model-value="setUnlimitedBandwidth" />
+                    <FieldDescription>开启后不声明带宽，由客户端拥塞控制自行探测；关闭时按填写的 Mbps 作为上限提示。</FieldDescription>
+                  </Field>
+                  <Field class="field">
                     <FieldLabel for="hysteria-up">服务器上传 Mbps</FieldLabel>
-                    <Input id="hysteria-up" :model-value="form.hysteria2.up_mbps" type="number" min="1" max="10000" inputmode="numeric" aria-label="服务器上传 Mbps" :disabled="saving" :required="form.hysteria2.enabled" @update:model-value="updateNumber(form.hysteria2, 'up_mbps', $event)" />
-                    <FieldDescription>QUIC 拥塞控制的带宽提示。</FieldDescription>
+                    <Input id="hysteria-up" :model-value="form.hysteria2.up_mbps" type="number" min="0" max="10000" inputmode="numeric" aria-label="服务器上传 Mbps" :disabled="saving || unlimitedBandwidth" :required="form.hysteria2.enabled && !unlimitedBandwidth" @update:model-value="updateNumber(form.hysteria2, 'up_mbps', $event)" />
+                    <FieldDescription>0 表示不限速。</FieldDescription>
                   </Field>
                   <Field class="field">
                     <FieldLabel for="hysteria-down">服务器下载 Mbps</FieldLabel>
-                    <Input id="hysteria-down" :model-value="form.hysteria2.down_mbps" type="number" min="1" max="10000" inputmode="numeric" aria-label="服务器下载 Mbps" :disabled="saving" :required="form.hysteria2.enabled" @update:model-value="updateNumber(form.hysteria2, 'down_mbps', $event)" />
-                    <FieldDescription>服务器可稳定提供的下行带宽。</FieldDescription>
+                    <Input id="hysteria-down" :model-value="form.hysteria2.down_mbps" type="number" min="0" max="10000" inputmode="numeric" aria-label="服务器下载 Mbps" :disabled="saving || unlimitedBandwidth" :required="form.hysteria2.enabled && !unlimitedBandwidth" @update:model-value="updateNumber(form.hysteria2, 'down_mbps', $event)" />
+                    <FieldDescription>填略高于实测链路的值，过大会加剧拥塞。</FieldDescription>
+                  </Field>
+                  <Field class="field">
+                    <FieldLabel for="hysteria-bbr">BBR 拥塞档位</FieldLabel>
+                    <NativeSelect id="hysteria-bbr" :model-value="form.hysteria2.bbr_profile" :disabled="saving" aria-label="Hysteria2 BBR 拥塞档位" @update:model-value="form.hysteria2.bbr_profile = $event">
+                      <NativeSelectOption value="conservative">conservative（保守）</NativeSelectOption>
+                      <NativeSelectOption value="standard">standard（默认）</NativeSelectOption>
+                      <NativeSelectOption value="aggressive">aggressive（激进）</NativeSelectOption>
+                    </NativeSelect>
+                    <FieldDescription>高丢包链路可试 aggressive，代价是更容易加剧拥塞。</FieldDescription>
+                  </Field>
+                  <Field class="field">
+                    <FieldLabel for="hysteria-obfs">QUIC 混淆</FieldLabel>
+                    <NativeSelect id="hysteria-obfs" :model-value="form.hysteria2.obfs_type" :disabled="saving" aria-label="Hysteria2 QUIC 混淆" @update:model-value="setObfsType">
+                      <NativeSelectOption value="">关闭</NativeSelectOption>
+                      <NativeSelectOption value="salamander">salamander</NativeSelectOption>
+                      <NativeSelectOption value="gecko">gecko</NativeSelectOption>
+                    </NativeSelect>
+                    <FieldDescription>把 QUIC 伪装成随机 UDP，可缓解运营商对 UDP 的限速；客户端必须填同样的混淆密码。</FieldDescription>
+                  </Field>
+                  <Field v-if="form.hysteria2.obfs_type" class="field">
+                    <FieldLabel for="hysteria-obfs-password">混淆密码</FieldLabel>
+                    <div class="secret-wrap">
+                      <Input id="hysteria-obfs-password" v-model="form.hysteria2.obfs_password" class="mono" :type="showObfsPassword ? 'text' : 'password'" autocomplete="off" spellcheck="false" aria-label="混淆密码" :disabled="saving" :required="form.hysteria2.enabled" @blur="trimField(form.hysteria2, 'obfs_password')" />
+                      <Button type="button" variant="ghost" size="sm" class="secret-toggle" :aria-label="showObfsPassword ? '隐藏混淆密码' : '显示混淆密码'" :aria-pressed="showObfsPassword" :disabled="saving" @click="showObfsPassword = !showObfsPassword">
+                        <EyeOff v-if="showObfsPassword" /><Eye v-else />{{ showObfsPassword ? '隐藏' : '显示' }}
+                      </Button>
+                    </div>
+                    <FieldDescription class="danger-help">开启后旧客户端立即断连，需重新导入链接；密码会进入客户端链接。</FieldDescription>
                   </Field>
                 </div>
               </CollapsibleContent>

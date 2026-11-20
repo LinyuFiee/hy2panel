@@ -230,7 +230,7 @@ func TestInvalidConfigRejected(t *testing.T) {
 		{"panel port conflict", func(c *Config) { c.Reality.Port = 8443 }},
 		{"short ID", func(c *Config) { c.Reality.ShortID = "xyz" }},
 		{"certificate traversal", func(c *Config) { c.Panel.CertFile = "/etc/hy2panel/certs/../panel.json" }},
-		{"Hysteria2 bandwidth", func(c *Config) { c.Hysteria2.UpMbps = 0 }},
+		{"Hysteria2 bandwidth", func(c *Config) { c.Hysteria2.UpMbps = 10001 }},
 		{"Hysteria2 password", func(c *Config) { c.Hysteria2.Password = "short" }},
 		{"telemetry wildcard", func(c *Config) { c.Telemetry.Listen = ":19090" }},
 		{"telemetry public", func(c *Config) { c.Telemetry.Listen = "0.0.0.0:19090" }},
@@ -282,5 +282,107 @@ func TestRealityOnly(t *testing.T) {
 	}
 	if _, ok := cfg.ClientLinks()["hysteria2"]; ok {
 		t.Fatal("disabled Hysteria2 generated a client link")
+	}
+}
+
+func hysteriaInbound(t *testing.T, cfg *Config) map[string]any {
+	t.Helper()
+	data, err := cfg.SingBoxJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Inbounds []map[string]any `json:"inbounds"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	for _, inbound := range document.Inbounds {
+		if inbound["type"] == "hysteria2" {
+			return inbound
+		}
+	}
+	t.Fatal("hysteria2 inbound missing")
+	return nil
+}
+
+func TestHysteria2TuningRendering(t *testing.T) {
+	cfg := newTestConfig(t)
+	cfg.Hysteria2.UpMbps = 0
+	cfg.Hysteria2.DownMbps = 0
+	cfg.Hysteria2.BBRProfile = "aggressive"
+	cfg.Hysteria2.ObfsType = "salamander"
+	cfg.Hysteria2.ObfsPassword = "obfs-password-123456"
+
+	inbound := hysteriaInbound(t, cfg)
+	if _, ok := inbound["up_mbps"]; ok {
+		t.Fatal("up_mbps should be omitted when unlimited")
+	}
+	if _, ok := inbound["down_mbps"]; ok {
+		t.Fatal("down_mbps should be omitted when unlimited")
+	}
+	if inbound["bbr_profile"] != "aggressive" {
+		t.Fatalf("unexpected bbr_profile: %v", inbound["bbr_profile"])
+	}
+	obfs, ok := inbound["obfs"].(map[string]any)
+	if !ok {
+		t.Fatalf("obfs missing: %#v", inbound)
+	}
+	if obfs["type"] != "salamander" || obfs["password"] != "obfs-password-123456" {
+		t.Fatalf("unexpected obfs: %#v", obfs)
+	}
+
+	link := cfg.ClientLinks()["hysteria2"]
+	for _, want := range []string{"obfs=salamander", "obfs-password=obfs-password-123456"} {
+		if !strings.Contains(link, want) {
+			t.Fatalf("client link missing %q: %s", want, link)
+		}
+	}
+}
+
+func TestHysteria2TuningDefaults(t *testing.T) {
+	cfg := newTestConfig(t)
+	if cfg.Hysteria2.BBRProfile != "standard" {
+		t.Fatalf("unexpected default bbr profile: %q", cfg.Hysteria2.BBRProfile)
+	}
+	inbound := hysteriaInbound(t, cfg)
+	if inbound["up_mbps"] != float64(100) || inbound["down_mbps"] != float64(100) {
+		t.Fatalf("default bandwidth missing: %#v", inbound)
+	}
+	if _, ok := inbound["obfs"]; ok {
+		t.Fatal("obfs should be disabled by default")
+	}
+	if strings.Contains(cfg.ClientLinks()["hysteria2"], "obfs") {
+		t.Fatal("default client link should not carry obfs parameters")
+	}
+}
+
+func TestHysteria2TuningValidation(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*Config)
+		ok     bool
+	}{
+		{"unlimited", func(c *Config) { c.Hysteria2.UpMbps = 0; c.Hysteria2.DownMbps = 0 }, true},
+		{"asymmetric", func(c *Config) { c.Hysteria2.UpMbps = 100; c.Hysteria2.DownMbps = 1000 }, true},
+		{"negative bandwidth", func(c *Config) { c.Hysteria2.UpMbps = -1 }, false},
+		{"oversized bandwidth", func(c *Config) { c.Hysteria2.DownMbps = 10001 }, false},
+		{"unknown bbr profile", func(c *Config) { c.Hysteria2.BBRProfile = "turbo" }, false},
+		{"empty bbr profile", func(c *Config) { c.Hysteria2.BBRProfile = "" }, true},
+		{"obfs without password", func(c *Config) { c.Hysteria2.ObfsType = "salamander" }, false},
+		{"short obfs password", func(c *Config) { c.Hysteria2.ObfsType = "salamander"; c.Hysteria2.ObfsPassword = "short" }, false},
+		{"obfs password without type", func(c *Config) { c.Hysteria2.ObfsPassword = "obfs-password-123456" }, false},
+		{"unknown obfs type", func(c *Config) { c.Hysteria2.ObfsType = "rc4"; c.Hysteria2.ObfsPassword = "obfs-password-123456" }, false},
+	}
+	for _, test := range cases {
+		cfg := newTestConfig(t)
+		test.mutate(cfg)
+		err := cfg.Validate()
+		if test.ok && err != nil {
+			t.Fatalf("%s: unexpected error: %v", test.name, err)
+		}
+		if !test.ok && err == nil {
+			t.Fatalf("%s: expected validation error", test.name)
+		}
 	}
 }

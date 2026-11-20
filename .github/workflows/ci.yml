@@ -289,6 +289,22 @@ jobs:
             }
           }' > "${WORK_DIR}/hysteria2-inbound.json"
 
+          jq -n --arg cert "${WORK_DIR}/hy2.crt" --arg key "${WORK_DIR}/hy2.key" '{
+            type: "hysteria2",
+            tag: "hysteria2",
+            listen: "::",
+            listen_port: 24443,
+            users: [{password: "compatibility-password-123456"}],
+            bbr_profile: "aggressive",
+            obfs: {type: "salamander", password: "obfs-compatibility-123456"},
+            tls: {
+              enabled: true,
+              certificate_path: $cert,
+              key_path: $key,
+              alpn: ["h3"]
+            }
+          }' > "${WORK_DIR}/hysteria2-tuned-inbound.json"
+
           config_filter='{
             log: {level: "warn", timestamp: true},
             inbounds: .,
@@ -302,11 +318,12 @@ jobs:
           }'
           jq -s "${config_filter}" "${WORK_DIR}/reality-inbound.json" > "${WORK_DIR}/reality.json"
           jq -s "${config_filter}" "${WORK_DIR}/hysteria2-inbound.json" > "${WORK_DIR}/hysteria2.json"
+          jq -s "${config_filter}" "${WORK_DIR}/hysteria2-tuned-inbound.json" > "${WORK_DIR}/hysteria2-tuned.json"
           jq -s "${config_filter}" \
             "${WORK_DIR}/reality-inbound.json" "${WORK_DIR}/hysteria2-inbound.json" \
             > "${WORK_DIR}/dual.json"
 
-          for config in reality hysteria2 dual; do
+          for config in reality hysteria2 hysteria2-tuned dual; do
             printf 'checking %s config with sing-box %s\n' "${config}" "${SING_BOX_VERSION}"
             "${SING_BOX_BINARY}" check -c "${WORK_DIR}/${config}.json"
           done

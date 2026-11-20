@@ -55,14 +55,17 @@ type Reality struct {
 }
 
 type Hysteria2 struct {
-	Enabled  bool   `json:"enabled"`
-	Port     int    `json:"port"`
-	Domain   string `json:"domain"`
-	Password string `json:"password"`
-	CertFile string `json:"cert_file"`
-	KeyFile  string `json:"key_file"`
-	UpMbps   int    `json:"up_mbps"`
-	DownMbps int    `json:"down_mbps"`
+	Enabled      bool   `json:"enabled"`
+	Port         int    `json:"port"`
+	Domain       string `json:"domain"`
+	Password     string `json:"password"`
+	CertFile     string `json:"cert_file"`
+	KeyFile      string `json:"key_file"`
+	UpMbps       int    `json:"up_mbps"`
+	DownMbps     int    `json:"down_mbps"`
+	BBRProfile   string `json:"bbr_profile,omitempty"`
+	ObfsType     string `json:"obfs_type,omitempty"`
+	ObfsPassword string `json:"obfs_password,omitempty"`
 }
 
 type RackNerd struct {
@@ -151,14 +154,15 @@ func Initial(panelDomain, hy2Domain, publicHost, _ string, password string) (*Co
 			ShortID:    shortID,
 		},
 		Hysteria2: Hysteria2{
-			Enabled:  hy2Domain != "",
-			Port:     443,
-			Domain:   hy2Domain,
-			Password: hy2Password,
-			CertFile: "/etc/hy2panel/certs/hy2.crt",
-			KeyFile:  "/etc/hy2panel/certs/hy2.key",
-			UpMbps:   100,
-			DownMbps: 100,
+			Enabled:    hy2Domain != "",
+			Port:       443,
+			Domain:     hy2Domain,
+			Password:   hy2Password,
+			CertFile:   "/etc/hy2panel/certs/hy2.crt",
+			KeyFile:    "/etc/hy2panel/certs/hy2.key",
+			UpMbps:     100,
+			DownMbps:   100,
+			BBRProfile: "standard",
 		},
 	}
 	if err := c.Validate(); err != nil {
@@ -293,8 +297,25 @@ func (c *Config) Validate() error {
 		if len(c.Hysteria2.Password) < 16 || len(c.Hysteria2.Password) > 256 {
 			return errors.New("Hysteria2 密码长度必须为 16 到 256 个字符")
 		}
-		if c.Hysteria2.UpMbps < 1 || c.Hysteria2.UpMbps > 10000 || c.Hysteria2.DownMbps < 1 || c.Hysteria2.DownMbps > 10000 {
-			return errors.New("Hysteria2 带宽必须在 1 到 10000 Mbps 之间")
+		if c.Hysteria2.UpMbps < 0 || c.Hysteria2.UpMbps > 10000 || c.Hysteria2.DownMbps < 0 || c.Hysteria2.DownMbps > 10000 {
+			return errors.New("Hysteria2 带宽必须在 0 到 10000 Mbps 之间，0 表示不限速")
+		}
+		switch c.Hysteria2.BBRProfile {
+		case "", "conservative", "standard", "aggressive":
+		default:
+			return errors.New("Hysteria2 BBR 档位必须是 conservative、standard 或 aggressive")
+		}
+		switch c.Hysteria2.ObfsType {
+		case "":
+			if c.Hysteria2.ObfsPassword != "" {
+				return errors.New("未启用混淆时不能保留混淆密码")
+			}
+		case "salamander", "gecko":
+			if len(c.Hysteria2.ObfsPassword) < 16 || len(c.Hysteria2.ObfsPassword) > 256 {
+				return errors.New("Hysteria2 混淆密码长度必须为 16 到 256 个字符")
+			}
+		default:
+			return errors.New("Hysteria2 混淆类型必须是 salamander 或 gecko")
 		}
 		if err := validateCertPaths(c.Hysteria2.CertFile, c.Hysteria2.KeyFile); err != nil {
 			return err
@@ -345,7 +366,7 @@ func (c *Config) SingBoxJSON() ([]byte, error) {
 		})
 	}
 	if c.Hysteria2.Enabled {
-		inbounds = append(inbounds, map[string]any{
+		hysteria := map[string]any{
 			"type":        "hysteria2",
 			"tag":         "hysteria2",
 			"listen":      "::",
@@ -353,15 +374,29 @@ func (c *Config) SingBoxJSON() ([]byte, error) {
 			"users": []map[string]any{{
 				"password": c.Hysteria2.Password,
 			}},
-			"up_mbps":   c.Hysteria2.UpMbps,
-			"down_mbps": c.Hysteria2.DownMbps,
 			"tls": map[string]any{
 				"enabled":          true,
 				"certificate_path": c.Hysteria2.CertFile,
 				"key_path":         c.Hysteria2.KeyFile,
 				"alpn":             []string{"h3"},
 			},
-		})
+		}
+		if c.Hysteria2.UpMbps > 0 {
+			hysteria["up_mbps"] = c.Hysteria2.UpMbps
+		}
+		if c.Hysteria2.DownMbps > 0 {
+			hysteria["down_mbps"] = c.Hysteria2.DownMbps
+		}
+		if c.Hysteria2.BBRProfile != "" {
+			hysteria["bbr_profile"] = c.Hysteria2.BBRProfile
+		}
+		if c.Hysteria2.ObfsType != "" {
+			hysteria["obfs"] = map[string]any{
+				"type":     c.Hysteria2.ObfsType,
+				"password": c.Hysteria2.ObfsPassword,
+			}
+		}
+		inbounds = append(inbounds, hysteria)
 	}
 	doc := map[string]any{
 		"log":       map[string]any{"level": "warn", "timestamp": true},
@@ -404,6 +439,10 @@ func (c *Config) ClientLinks() map[string]string {
 		q := url.Values{}
 		q.Set("sni", c.Hysteria2.Domain)
 		q.Set("insecure", "0")
+		if c.Hysteria2.ObfsType != "" {
+			q.Set("obfs", c.Hysteria2.ObfsType)
+			q.Set("obfs-password", c.Hysteria2.ObfsPassword)
+		}
 		u := url.URL{
 			Scheme:   "hysteria2",
 			User:     url.User(c.Hysteria2.Password),
