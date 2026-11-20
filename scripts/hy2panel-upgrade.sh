@@ -174,9 +174,9 @@ restore_snapshot() {
       systemctl disable "${unit}" >/dev/null 2>&1 || true
     fi
     if [[ ${active} == true ]]; then
-      systemctl restart "${unit}" >/dev/null 2>&1 || failed=1
+      systemctl --no-block restart "${unit}" >/dev/null 2>&1 || true
     else
-      systemctl stop "${unit}" >/dev/null 2>&1 || true
+      systemctl --no-block stop "${unit}" >/dev/null 2>&1 || true
     fi
   done < <(jq -c '.[]' "${snapshot}/units.json")
   if [[ $(< "${snapshot}/firewall-active") == true ]]; then
@@ -220,6 +220,7 @@ cleanup() {
   if [[ -n ${WORK_DIR} && -d ${WORK_DIR} ]]; then
     rm -rf "${WORK_DIR}"
   fi
+  systemctl start --no-block hy2panel-upgrade.path >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -278,6 +279,7 @@ remove_legacy_firewall() {
 
 [[ -f ${REQUEST} && -f ${BASE}/panel.json ]]
 parse_request
+rm -f "${REQUEST}"
 if ! hy2panel_version_at_least "${TARGET_VERSION}"; then
   atomic_json_result failed_no_change "不再支持 ${TARGET_VERSION}：面板最低可升级版本为 $(hy2panel_min_panel_version)"
   exit 1
@@ -287,6 +289,12 @@ if ! hy2panel_lock_maintenance; then
   atomic_json_result failed_no_change '另一个维护任务正在运行' false false
   exit 1
 fi
+systemctl stop hy2panel-upgrade.path >/dev/null 2>&1 || true
+if ! hy2panel_require_free_mb "${TRANSACTIONS}"; then
+  atomic_json_result failed_no_change "磁盘可用空间不足：需要至少 $(hy2panel_min_free_mb) MB，当前 $(hy2panel_disk_free_mb "${TRANSACTIONS}") MB"
+  exit 1
+fi
+hy2panel_prune_transactions "${TRANSACTIONS}"
 rm -f "${RESULT}"
 WORK_DIR="$(mktemp -d "${TRANSACTIONS}/upgrade.XXXXXX")"
 chmod 700 "${WORK_DIR}"
@@ -328,3 +336,4 @@ hy2panel_sing_box_healthy "${BINARY}" "${BASE}/sing-box.json" "" 8
 PHASE=committed
 write_journal committed '升级完成'
 atomic_json_result succeeded '升级完成' false false
+rm -rf "${ACTIVE}/snapshot"

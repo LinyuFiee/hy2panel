@@ -406,19 +406,26 @@ submit_sing_box() {
   jq -n --arg id "${id}" --arg action "${action}" --arg target "${target}" '{schema:1,id:$id,action:$action,target_version:$target}' > "${request}"
   chown hy2panel:hy2panel "${request}"
   chmod 600 "${request}"
+  systemctl stop hy2panel-sing-box.path >/dev/null 2>&1 || true
   mv "${request}" "${BASE}/sing-box-update.request"
-  systemctl start hy2panel-sing-box.service
-  jq . "${BASE}/sing-box-update.result"
+  if ! systemctl start hy2panel-sing-box.service; then
+    systemctl start --no-block hy2panel-sing-box.path >/dev/null 2>&1 || true
+    printf 'sing-box 切换任务未能启动。请检查：systemctl status hy2panel-sing-box.service --no-pager\n' >&2
+    exit 1
+  fi
+  if [[ -f ${BASE}/sing-box-update.result ]]; then
+    jq . "${BASE}/sing-box-update.result"
+  else
+    printf '任务已结束，但未生成结果文件，请执行 hy2 logs sing-box 查看。\n' >&2
+    exit 1
+  fi
 }
 
 request_update() {
   require_installed
   require_root
   local target id request
-  target="$(curl -fsS --unix-socket /run/hy2panel/admin.sock http://localhost/internal/update-target 2>/dev/null | jq -r '.target_version // empty' 2>/dev/null || true)"
-  if [[ -z ${target} ]]; then
-    read -r -p '目标面板版本（X.Y.Z）: ' target
-  fi
+  read -r -p '目标面板版本（X.Y.Z）: ' target
   [[ ${target} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf '版本格式无效。\n' >&2; exit 2; }
   source /usr/local/lib/hy2panel/hy2panel-transaction.sh
   if ! hy2panel_version_at_least "${target}"; then
@@ -430,9 +437,19 @@ request_update() {
   jq -n --arg id "${id}" --arg target "${target}" '{schema:1,id:$id,action:"upgrade",target_version:$target}' > "${request}"
   chown hy2panel:hy2panel "${request}"
   chmod 600 "${request}"
+  systemctl stop hy2panel-upgrade.path >/dev/null 2>&1 || true
   mv "${request}" "${BASE}/upgrade.request"
-  systemctl start hy2panel-upgrade.service
-  jq . "${BASE}/upgrade.result"
+  if ! systemctl start hy2panel-upgrade.service; then
+    systemctl start --no-block hy2panel-upgrade.path >/dev/null 2>&1 || true
+    printf '升级任务未能启动。请检查：systemctl status hy2panel-upgrade.service --no-pager\n' >&2
+    exit 1
+  fi
+  if [[ -f ${BASE}/upgrade.result ]]; then
+    jq . "${BASE}/upgrade.result"
+  else
+    printf '升级任务已结束，但未生成结果文件，请执行 hy2 logs upgrade 查看。\n' >&2
+    exit 1
+  fi
 }
 
 dispatch() {

@@ -156,6 +156,37 @@ hy2panel_version_at_least() {
   return 0
 }
 
+hy2panel_min_free_mb() {
+  printf '%s\n' 300
+}
+
+hy2panel_disk_free_mb() {
+  local path=$1
+  df -Pk "${path}" 2>/dev/null | awk 'NR == 2 { printf "%d\n", $4 / 1024; exit }'
+}
+
+hy2panel_require_free_mb() {
+  local path=$1 required=${2:-$(hy2panel_min_free_mb)} available
+  available="$(hy2panel_disk_free_mb "${path}")"
+  [[ ${available} =~ ^[0-9]+$ ]] || return 0
+  ((available >= required))
+}
+
+hy2panel_prune_transactions() {
+  local root=$1 keep=${2:-} entry name
+  [[ -d ${root} ]] || return 0
+  for entry in "${root}"/*; do
+    [[ -d ${entry} && ! -L ${entry} ]] || continue
+    name="$(basename -- "${entry}")"
+    case ${name} in
+      upgrade.* | sing-box.*) ;;
+      *) continue ;;
+    esac
+    [[ -n ${keep} && ${entry} == "${keep}" ]] && continue
+    rm -rf -- "${entry}" 2>/dev/null || true
+  done
+}
+
 hy2panel_archive_members_safe() {
   local archive=$1 listing verbose name
   listing="$(mktemp)"

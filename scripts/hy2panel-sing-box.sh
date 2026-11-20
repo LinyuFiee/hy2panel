@@ -26,6 +26,7 @@ cleanup() {
   if [[ -n ${WORK_DIR} && -d ${WORK_DIR} ]]; then
     rm -rf "${WORK_DIR}"
   fi
+  systemctl start --no-block hy2panel-sing-box.path >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -262,14 +263,22 @@ run_request() {
     TARGET_VERSION="$(previous_version)"
     [[ -n ${TARGET_VERSION} ]]
   fi
-  rm -f "${RESULT}"
-  WORK_DIR="$(mktemp -d "${TRANSACTIONS}/sing-box.XXXXXX")"
-  chmod 700 "${WORK_DIR}"
+  rm -f "${REQUEST}"
   if ! hy2panel_lock_maintenance; then
     PHASE=preflight
     write_operation failed_no_change '另一个维护任务正在运行'
     exit 1
   fi
+  systemctl stop hy2panel-sing-box.path >/dev/null 2>&1 || true
+  if ! hy2panel_require_free_mb "${TRANSACTIONS}"; then
+    PHASE=preflight
+    write_operation failed_no_change "磁盘可用空间不足：需要至少 $(hy2panel_min_free_mb) MB，当前 $(hy2panel_disk_free_mb "${TRANSACTIONS}") MB"
+    exit 1
+  fi
+  hy2panel_prune_transactions "${TRANSACTIONS}"
+  rm -f "${RESULT}"
+  WORK_DIR="$(mktemp -d "${TRANSACTIONS}/sing-box.XXXXXX")"
+  chmod 700 "${WORK_DIR}"
   migrate_legacy
   OLD_CURRENT="$(current_version)"
   OLD_PREVIOUS="$(previous_version)"

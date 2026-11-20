@@ -2,7 +2,7 @@
 Description=Switch or roll back the verified sing-box core
 Wants=network-online.target
 After=network-online.target hy2panel-recover.service
-Requires=hy2panel-recover.service
+Wants=hy2panel-recover.service
 
 [Service]
 Type=oneshot

@@ -139,10 +139,12 @@ hy2 update
 面板 UI 的「系统设置 → 面板更新」先从 GitHub 最新稳定 Release 取得精确目标版本，再提交含该版本的升级请求。服务器只下载 `v目标版本` 的固定 bundle 与 `.sha256`，并验证包内二进制报告的版本完全一致。
 
 ```bash
-hy2 update    # 交互输入目标版本，例如 0.7.0
+hy2 update    # 交互输入目标版本，例如 0.7.1
 ```
 
 升级流程：预检下载和校验 → 记录受管文件/单元快照 → 安装新文件 → 配置迁移与渲染 → 重启核心和面板 → 健康检查 → 提交。配置、二进制、脚本和 systemd 单元在同一维护锁内处理，失败时尝试恢复快照。`/etc/hy2panel/panel.json` 不会被新包覆盖，域名、UUID、密钥、密码与 RackNerd 凭据会保留。
+
+升级开始时会检查事务目录的可用空间，低于 300 MB 直接返回 `failed_no_change`，同时清理此前残留的事务目录。升级成功后只保留阶段日志，不再占用快照空间。
 
 `/etc/hy2panel/upgrade.result` 的 `status` 有四种终态：`succeeded`、`failed_rolled_back`（失败已自动恢复）、`rollback_failed`（回滚也失败，需人工介入）、`failed_no_change`（预检失败，系统未改动）。
 

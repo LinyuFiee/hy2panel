@@ -60,9 +60,9 @@ restore_snapshot() {
         systemctl disable "${unit}" >/dev/null 2>&1 || true
       fi
       if [[ ${active} == true && ${unit} != hy2panel-recover.service ]]; then
-        systemctl --no-block start "${unit}" >/dev/null 2>&1 || failed=1
+        systemctl --no-block start "${unit}" >/dev/null 2>&1 || true
       elif [[ ${active} != true && ${unit} != hy2panel-recover.service ]]; then
-        systemctl stop "${unit}" >/dev/null 2>&1 || true
+        systemctl --no-block stop "${unit}" >/dev/null 2>&1 || true
       fi
     done < <(jq -c '.[]' "${snapshot}/units.json")
   fi
@@ -78,7 +78,7 @@ if [[ ! -f ${ACTIVE}/journal.json ]]; then
   exit 0
 fi
 STATUS="$(jq -r '.status // ""' "${ACTIVE}/journal.json")"
-if [[ ${STATUS} == committed || ${STATUS} == rolled_back ]]; then
+if [[ ${STATUS} != running ]]; then
   exit 0
 fi
 

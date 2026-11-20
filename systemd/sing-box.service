@@ -2,7 +2,7 @@
 Description=sing-box proxy service
 After=network-online.target hy2panel-recover.service
 Wants=network-online.target
-Requires=hy2panel-recover.service
+Wants=hy2panel-recover.service
 
 [Service]
 Type=simple
