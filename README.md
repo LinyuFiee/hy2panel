@@ -43,13 +43,23 @@
 
 ## 安装
 
-### 交互式
+安装、升级、备份、恢复、核心切换和卸载全部集中在 `hy2` 一个脚本里。首次安装执行一次性引导命令：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LinyuFiee/hy2panel/main/scripts/bootstrap.sh | bash
 ```
 
-脚本通过 `/dev/tty` 依次询问面板域名、Hysteria2 证书域名、Reality 公网地址、ACME 邮箱（可留空）、RackNerd API Key/Hash（可同时留空，稍后在面板设置）。确认摘要后，脚本下载最新 Release、校验 bundle SHA-256、申请证书、应用 BBR 模板并启动服务。
+引导脚本只负责取回最新的 `hy2` 并转交 `hy2 install`，真正的安装逻辑在 `hy2` 内部。安装完成后，直接运行 `hy2` 即可打开管理台，未安装时菜单只提供「安装面板」一项：
+
+```bash
+hy2              # 交互菜单
+hy2 install      # 非交互安装；已安装时会拒绝，避免覆盖密钥
+hy2 uninstall    # 保守卸载
+```
+
+### 交互式
+
+`hy2 install` 通过 `/dev/tty` 依次询问面板域名、Hysteria2 证书域名、Reality 公网地址、ACME 邮箱（可留空）、RackNerd API Key/Hash（可同时留空，稍后在面板设置）。确认摘要后，下载最新 Release、校验 bundle SHA-256、申请证书、应用 BBR 模板并启动服务。
 
 面板地址与随机管理员密码保存在仅 root 可读的 `/root/hy2panel-credentials`。首次登录后建议立即执行 `hy2 passwd` 设置独立强密码。
 
@@ -103,9 +113,11 @@ hy2 sing-box rollback
 
 ## `hy2` 管理命令
 
-直接运行 `hy2` 打开交互菜单，也可使用子命令：
+直接运行 `hy2` 打开管理台，也可使用子命令：
 
 ```text
+hy2 install
+hy2 uninstall [--purge-data]
 hy2 status
 hy2 info
 hy2 logs [panel|sing-box|watchdog|apply|upgrade]
@@ -118,10 +130,9 @@ hy2 sing-box list
 hy2 sing-box set <版本>
 hy2 sing-box rollback
 hy2 update
-hy2 uninstall [--purge-data]
 ```
 
-除只读查看外，多数维护操作需要 root。`hy2 update` 会要求输入精确的 `X.Y.Z` 目标版本。
+除 `status`、`info`、`logs`、`check` 外，多数操作需要 root。`hy2 update` 会要求输入精确的 `X.Y.Z` 目标版本。未安装时只有 `install` 可用，其余子命令会提示先安装。
 
 ## 升级
 

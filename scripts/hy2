@@ -1,91 +1,331 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+BASE=/etc/hy2panel
+STATE_ROOT=/var/lib/hy2panel-system
+PANEL_BIN=/usr/local/bin/hy2panel
+REPOSITORY="${HY2PANEL_REPOSITORY:-LinyuFiee/hy2panel}"
+BUNDLE=hy2panel-bundle-linux-amd64.tar.gz
+
 SCRIPT_ARGS=("$@")
+
+INTERACTIVE=0
+PROMPTED=0
+MISSING=0
+
+self_path() {
+  local source=${BASH_SOURCE[0]:-}
+  if [[ -n ${source} && -f ${source} ]]; then
+    readlink -f -- "${source}" 2>/dev/null || printf '%s\n' "${source}"
+  else
+    printf '%s\n' /usr/local/bin/hy2
+  fi
+}
+
+is_installed() {
+  [[ -f ${BASE}/panel.json ]]
+}
+
+require_installed() {
+  if is_installed; then
+    return
+  fi
+  printf '未检测到 %s，请先执行 hy2 install。\n' "${BASE}/panel.json" >&2
+  exit 1
+}
 
 require_root() {
   if [[ ${EUID} -eq 0 ]]; then
     return
   fi
-  if [[ -t 0 && -t 1 && -r /dev/tty && -w /dev/tty ]] && command -v sudo >/dev/null 2>&1; then
+  local target
+  target="$(self_path)"
+  if [[ -t 0 && -t 1 && -r /dev/tty && -w /dev/tty ]] && command -v sudo >/dev/null 2>&1 && [[ -f ${target} ]]; then
     read -r -p '该操作需要 root 权限，是否使用 sudo 获取？[Y/n] ' allow_root < /dev/tty
     if [[ ! ${allow_root:-Y} =~ ^[Nn]$ ]]; then
-      exec sudo -E /usr/local/bin/hy2 "${SCRIPT_ARGS[@]}"
+      exec sudo -E bash "${target}" "${SCRIPT_ARGS[@]}"
     fi
   fi
   printf '未获得 root 权限，无法执行该维护操作。\n' >&2
   exit 1
 }
 
+ask_value() {
+  local variable=$1
+  local prompt=$2
+  local default_value=${3:-}
+  local value
+  if [[ -n ${!variable:-} ]]; then
+    return
+  fi
+  if [[ ${INTERACTIVE} -eq 0 ]]; then
+    printf '缺少必填配置 %s。非交互安装请通过环境变量提供。\n' "${variable}" >&2
+    MISSING=1
+    return
+  fi
+  if [[ -n ${default_value} ]]; then
+    read -r -p "${prompt} [${default_value}]: " value < /dev/tty
+  else
+    read -r -p "${prompt}: " value < /dev/tty
+  fi
+  value="${value:-${default_value}}"
+  if [[ -z ${value} ]]; then
+    printf '%s 不能为空。\n' "${variable}" >&2
+    MISSING=1
+    return
+  fi
+  printf -v "${variable}" '%s' "${value}"
+  PROMPTED=1
+}
+
+ask_optional() {
+  local variable=$1
+  local prompt=$2
+  local default_value=${3:-}
+  local value
+  if [[ -n ${!variable:-} || ${INTERACTIVE} -eq 0 ]]; then
+    return
+  fi
+  if [[ -n ${default_value} ]]; then
+    read -r -p "${prompt} [${default_value}]: " value < /dev/tty
+  else
+    read -r -p "${prompt}: " value < /dev/tty
+  fi
+  printf -v "${variable}" '%s' "${value:-${default_value}}"
+  PROMPTED=1
+}
+
+ask_secret() {
+  local variable=$1
+  local prompt=$2
+  local value
+  if [[ -n ${!variable:-} || ${INTERACTIVE} -eq 0 ]]; then
+    return
+  fi
+  read -r -s -p "${prompt}: " value < /dev/tty
+  printf '\n' > /dev/tty
+  printf -v "${variable}" '%s' "${value}"
+  PROMPTED=1
+}
+
+WORK_DIR=""
+
+cleanup_work_dir() {
+  if [[ -n ${WORK_DIR:-} && -d ${WORK_DIR} ]]; then
+    rm -rf "${WORK_DIR}"
+  fi
+}
+
+verify_sha256_file() {
+  local checksum_file=$1 expected_name=$2 directory=$3
+  local digest marker filename actual file_size expected_size
+  local -a checksum_lines=()
+  [[ ${expected_name} =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  [[ -f ${checksum_file} && ! -L ${checksum_file} ]] || return 1
+  [[ -f ${directory}/${expected_name} && ! -L ${directory}/${expected_name} ]] || return 1
+  file_size="$(wc -c < "${checksum_file}")" || return 1
+  expected_size=$((64 + 2 + ${#expected_name} + 1))
+  [[ ${file_size} -eq ${expected_size} || ${file_size} -eq $((expected_size + 1)) ]] || return 1
+  mapfile -t checksum_lines < "${checksum_file}"
+  [[ ${#checksum_lines[@]} -eq 1 ]] || return 1
+  checksum_lines[0]="${checksum_lines[0]%$'\r'}"
+  [[ ${checksum_lines[0]} =~ ^([0-9a-f]{64})(\ \ |\ \*)([^/\\]+)$ ]] || return 1
+  digest=${BASH_REMATCH[1]}
+  marker=${BASH_REMATCH[2]}
+  filename=${BASH_REMATCH[3]}
+  [[ ${marker} == "  " || ${marker} == " *" ]] || return 1
+  [[ ${filename} == "${expected_name}" ]] || return 1
+  actual="$(sha256sum "${directory}/${expected_name}" | cut -d' ' -f1)" || return 1
+  [[ ${actual} == "${digest}" ]]
+}
+
+install_panel() {
+  require_root
+
+  if is_installed; then
+    printf '检测到现有配置 %s，安装器不会覆盖密钥。\n升级请使用 hy2 update。\n' "${BASE}/panel.json" >&2
+    exit 1
+  fi
+  if [[ -n ${HY2PANEL_VERSION:-} ]]; then
+    printf 'HY2PANEL_VERSION 已不再支持（检测到 %s）：安装器始终下载最新稳定 Release，仅接受 0.6.1 及以上版本。\n' "${HY2PANEL_VERSION}" >&2
+    exit 1
+  fi
+  if [[ ! ${REPOSITORY} =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    printf 'GitHub 仓库地址无效。\n' >&2
+    exit 1
+  fi
+
+  source /etc/os-release
+  if [[ ${ID:-} != debian || ${VERSION_ID:-} != 12 ]]; then
+    printf '一键安装仅支持 Debian 12。\n' >&2
+    exit 1
+  fi
+
+  INTERACTIVE=0
+  if [[ ${HY2PANEL_NONINTERACTIVE:-0} != 1 && -r /dev/tty && -w /dev/tty ]]; then
+    INTERACTIVE=1
+  fi
+
+  local default_public_host="${PUBLIC_HOST:-}"
+  if [[ -z ${default_public_host} ]]; then
+    default_public_host="$(hostname -I 2>/dev/null || true)"
+    default_public_host="${default_public_host%% *}"
+  fi
+
+  if [[ ${INTERACTIVE} -eq 1 ]]; then
+    printf '\n\033[1;32mhy2panel 交互式安装\033[0m\n'
+    printf '直接回车接受默认值；RackNerd 凭据可留空，稍后在面板配置。\n\n'
+  fi
+
+  ask_value PANEL_DOMAIN '面板域名，例如 panel.example.com'
+  ask_value HY2_DOMAIN 'Hysteria2 证书域名，例如 hy2.example.com'
+  ask_value PUBLIC_HOST 'Reality 公网地址' "${default_public_host}"
+  ask_optional ACME_EMAIL '证书通知邮箱（可留空）'
+  ask_secret RACKNERD_API_KEY 'RackNerd API Key（可留空）'
+  ask_secret RACKNERD_API_HASH 'RackNerd API Hash（可留空）'
+
+  if [[ ${MISSING} -ne 0 ]]; then
+    exit 1
+  fi
+  if [[ -n ${RACKNERD_API_KEY:-} && -z ${RACKNERD_API_HASH:-} || -z ${RACKNERD_API_KEY:-} && -n ${RACKNERD_API_HASH:-} ]]; then
+    printf 'RackNerd API Key 和 Hash 必须同时填写，或同时留空。\n' >&2
+    exit 1
+  fi
+
+  export PANEL_DOMAIN HY2_DOMAIN PUBLIC_HOST ACME_EMAIL RACKNERD_API_KEY RACKNERD_API_HASH
+
+  if [[ ${PROMPTED} -eq 1 ]]; then
+    printf '\n安装摘要\n面板: https://%s:8443\nReality: %s\nHysteria2: %s\n访问方式: 公网 HTTPS + 管理员密码\n' "${PANEL_DOMAIN}" "${PUBLIC_HOST}" "${HY2_DOMAIN}"
+    local confirm
+    read -r -p '确认开始安装？[Y/n] ' confirm < /dev/tty
+    if [[ ${confirm:-Y} =~ ^[Nn]$ ]]; then
+      printf '已取消安装。\n'
+      exit 0
+    fi
+  fi
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y ca-certificates curl tar gzip coreutils
+
+  WORK_DIR="$(mktemp -d)"
+  trap cleanup_work_dir EXIT
+
+  local base_url="https://github.com/${REPOSITORY}/releases/latest/download"
+  curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${base_url}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
+  curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${base_url}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
+  verify_sha256_file "${WORK_DIR}/${BUNDLE}.sha256" "${BUNDLE}" "${WORK_DIR}"
+  mkdir "${WORK_DIR}/bundle"
+  while IFS= read -r member; do
+    member="${member#./}"
+    [[ -z ${member} ]] && continue
+    [[ ${member} != /* && ${member} != ".." && ${member} != ../* && ${member} != */../* && ${member} != */.. ]]
+  done < <(tar -tzf "${WORK_DIR}/${BUNDLE}")
+  tar -xzf "${WORK_DIR}/${BUNDLE}" -C "${WORK_DIR}/bundle" --no-same-owner --no-same-permissions
+
+  bash "${WORK_DIR}/bundle/scripts/install.sh"
+}
+
 usage() {
   cat <<'EOF'
-用法: hy2 <命令>
+用法: hy2 [命令]
 
+安装
+  install                        安装最新稳定版本（root，仅支持 Debian 12）
+
+管理（需已安装）
   status                         查看面板和节点状态
   info                           显示面板地址、版本与核心版本
   logs [panel|sing-box|watchdog|apply|upgrade]
   restart [panel|proxy|all]      重启固定服务
   check                          检查面板与 sing-box 配置
   passwd                         重置管理员密码并注销现有会话
-  backup [文件]                  创建加密信息敏感的 0600 备份
+  backup [文件]                  创建信息敏感的 0600 备份
   restore <文件>                 校验并恢复备份
   sing-box list                  查看允许及当前核心版本
   sing-box set <版本>            安装并切换受支持版本
   sing-box rollback              回滚到上一核心版本
-  update                         请求升级到已检测的目标版本
+  update                         请求升级到目标版本
   uninstall [--purge-data]       保守卸载
+
+不带参数运行将打开交互菜单。
 EOF
 }
 
 menu() {
-  cat <<'EOF'
+  local -a ids=() labels=()
+  if is_installed; then
+    ids=(status info logs restart check passwd backup restore sing-box update uninstall)
+    labels=('查看状态' '查看信息' '查看日志' '重启面板与节点' '检查配置' '重置管理员密码' '创建备份' '恢复备份' '管理 sing-box 版本' '更新面板' '卸载')
+  else
+    ids=(install)
+    labels=('安装面板（Debian 12）')
+  fi
 
-hy2panel 管理菜单
-  1. 查看状态
-  2. 查看信息
-  3. 查看日志
-  4. 重启面板与节点
-  5. 检查配置
-  6. 重置管理员密码
-  7. 创建备份
-  8. 恢复备份
-  9. 管理 sing-box 版本
- 10. 更新面板
- 11. 卸载
-  0. 退出
-EOF
+  printf '\n\033[1;32mhy2panel 管理台\033[0m\n'
+  if is_installed; then
+    printf '状态: 已安装\n\n'
+  else
+    printf '状态: 未安装\n\n'
+  fi
+
+  local index
+  for index in "${!ids[@]}"; do
+    printf ' %2d. %s\n' "$((index + 1))" "${labels[index]}"
+  done
+  printf '  0. 退出\n\n'
+
+  local choice
   read -r -p '请选择: ' choice
-  case ${choice} in
-    1) set -- status ;;
-    2) set -- info ;;
-    3) set -- logs ;;
-    4) set -- restart all ;;
-    5) set -- check ;;
-    6) set -- passwd ;;
-    7) set -- backup ;;
-    8) read -r -p '备份文件路径: ' archive; set -- restore "${archive}" ;;
-    9) set -- sing-box list ;;
-    10) set -- update ;;
-    11) set -- uninstall ;;
-    0) exit 0 ;;
-    *) printf '无效选择。\n' >&2; exit 2 ;;
+  choice="${choice:-0}"
+  if [[ ${choice} == 0 ]]; then
+    exit 0
+  fi
+  if [[ ! ${choice} =~ ^[0-9]+$ ]] || ((choice < 1 || choice > ${#ids[@]})); then
+    printf '无效选择。\n' >&2
+    exit 2
+  fi
+
+  case ${ids[choice - 1]} in
+    install) install_panel ;;
+    status) status ;;
+    info) info ;;
+    logs) logs panel ;;
+    restart) restart_services all ;;
+    check) check_config ;;
+    passwd) reset_password ;;
+    backup) require_root && /usr/local/sbin/hy2panel-backup "" ;;
+    restore)
+      local archive
+      read -r -p '备份文件路径: ' archive
+      if [[ -z ${archive} ]]; then
+        printf '未提供备份文件。\n' >&2
+        exit 2
+      fi
+      require_root && /usr/local/sbin/hy2panel-restore "${archive}"
+      ;;
+    sing-box) sing_box list ;;
+    update) request_update ;;
+    uninstall) require_root && /usr/local/sbin/hy2panel-uninstall ;;
   esac
-  dispatch "$@"
 }
 
 status() {
+  require_installed
   systemctl --no-pager --full status hy2panel.service sing-box.service || true
 }
 
 info() {
+  require_installed
   local domain panel_version core_version
-  domain="$(jq -r '.panel.domain' /etc/hy2panel/panel.json)"
-  panel_version="$(/usr/local/bin/hy2panel version --json | jq -r '.version')"
+  domain="$(jq -r '.panel.domain' "${BASE}/panel.json")"
+  panel_version="$("${PANEL_BIN}" version --json | jq -r '.version')"
   core_version="$(/usr/local/bin/sing-box version 2>/dev/null | sed -nE 's/^sing-box version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n1)"
   printf '面板: https://%s:8443\n面板版本: %s\nsing-box: %s\n' "${domain}" "${panel_version}" "${core_version:-未知}"
 }
 
 logs() {
+  require_installed
   local name=${1:-panel} unit
   case ${name} in
     panel) unit=hy2panel.service ;;
@@ -99,6 +339,7 @@ logs() {
 }
 
 restart_services() {
+  require_installed
   require_root
   case ${1:-all} in
     panel) systemctl restart hy2panel.service ;;
@@ -109,11 +350,13 @@ restart_services() {
 }
 
 check_config() {
-  /usr/local/bin/hy2panel check --config /etc/hy2panel/panel.json
-  /usr/local/bin/sing-box check -c /etc/hy2panel/sing-box.json
+  require_installed
+  "${PANEL_BIN}" check --config "${BASE}/panel.json"
+  /usr/local/bin/sing-box check -c "${BASE}/sing-box.json"
 }
 
 reset_password() {
+  require_installed
   require_root
   local first second backup
   read -r -s -p '新密码（12-128 个字符）: ' first
@@ -121,17 +364,17 @@ reset_password() {
   read -r -s -p '再次输入新密码: ' second
   printf '\n'
   [[ ${first} == "${second}" ]] || { printf '两次密码不一致。\n' >&2; exit 1; }
-  backup="$(mktemp /etc/hy2panel/.panel-before-password.XXXXXX)"
-  cp -a /etc/hy2panel/panel.json "${backup}"
+  backup="$(mktemp "${BASE}/.panel-before-password.XXXXXX")"
+  cp -a "${BASE}/panel.json" "${backup}"
   systemctl stop hy2panel.service
-  if printf '%s' "${first}" | runuser -u hy2panel -- /usr/local/bin/hy2panel reset-password --config /etc/hy2panel/panel.json; then
+  if printf '%s' "${first}" | runuser -u hy2panel -- "${PANEL_BIN}" reset-password --config "${BASE}/panel.json"; then
     install -o root -g root -m 600 /dev/null /root/hy2panel-credentials
-    printf '面板地址: https://%s:8443\n管理员密码: %s\n' "$(jq -r '.panel.domain' /etc/hy2panel/panel.json)" "${first}" > /root/hy2panel-credentials
+    printf '面板地址: https://%s:8443\n管理员密码: %s\n' "$(jq -r '.panel.domain' "${BASE}/panel.json")" "${first}" > /root/hy2panel-credentials
     systemctl start hy2panel.service
     rm -f "${backup}"
     printf '管理员密码已更新，旧会话已失效。\n'
   else
-    install -o hy2panel -g hy2panel -m 600 "${backup}" /etc/hy2panel/panel.json
+    install -o hy2panel -g hy2panel -m 600 "${backup}" "${BASE}/panel.json"
     systemctl start hy2panel.service || true
     rm -f "${backup}"
     printf '密码更新失败，已恢复旧配置。\n' >&2
@@ -140,11 +383,12 @@ reset_password() {
 }
 
 sing_box() {
+  require_installed
   require_root
   case ${1:-list} in
     list)
       jq '{recommended:[.versions[]|select(.status=="recommended")|.version][0],versions:[.versions[]|{version,status}]}' /usr/local/share/hy2panel/sing-box-versions.json
-      [[ ! -f /var/lib/hy2panel-system/sing-box/state.json ]] || jq '{current_version,previous_version,operation}' /var/lib/hy2panel-system/sing-box/state.json
+      [[ ! -f ${STATE_ROOT}/sing-box/state.json ]] || jq '{current_version,previous_version,operation}' "${STATE_ROOT}/sing-box/state.json"
       ;;
     set)
       [[ -n ${2:-} ]] || { printf '请指定版本。\n' >&2; exit 2; }
@@ -158,20 +402,20 @@ sing_box() {
 submit_sing_box() {
   local action=$1 target=$2 id request
   id="$(openssl rand -hex 16)"
-  request="$(mktemp /etc/hy2panel/.sing-box-request.XXXXXX)"
+  request="$(mktemp "${BASE}/.sing-box-request.XXXXXX")"
   jq -n --arg id "${id}" --arg action "${action}" --arg target "${target}" '{schema:1,id:$id,action:$action,target_version:$target}' > "${request}"
   chown hy2panel:hy2panel "${request}"
   chmod 600 "${request}"
-  mv "${request}" /etc/hy2panel/sing-box-update.request
+  mv "${request}" "${BASE}/sing-box-update.request"
   systemctl start hy2panel-sing-box.service
-  jq . /etc/hy2panel/sing-box-update.result
+  jq . "${BASE}/sing-box-update.result"
 }
 
 request_update() {
+  require_installed
   require_root
-  local state target id request
-  state="$(curl -fsS --unix-socket /run/hy2panel/admin.sock http://localhost/internal/update-target 2>/dev/null || true)"
-  target="$(jq -r '.target_version // empty' <<<"${state}")"
+  local target id request
+  target="$(curl -fsS --unix-socket /run/hy2panel/admin.sock http://localhost/internal/update-target 2>/dev/null | jq -r '.target_version // empty' 2>/dev/null || true)"
   if [[ -z ${target} ]]; then
     read -r -p '目标面板版本（X.Y.Z）: ' target
   fi
@@ -182,28 +426,29 @@ request_update() {
     exit 2
   fi
   id="$(openssl rand -hex 16)"
-  request="$(mktemp /etc/hy2panel/.upgrade-request.XXXXXX)"
+  request="$(mktemp "${BASE}/.upgrade-request.XXXXXX")"
   jq -n --arg id "${id}" --arg target "${target}" '{schema:1,id:$id,action:"upgrade",target_version:$target}' > "${request}"
   chown hy2panel:hy2panel "${request}"
   chmod 600 "${request}"
-  mv "${request}" /etc/hy2panel/upgrade.request
+  mv "${request}" "${BASE}/upgrade.request"
   systemctl start hy2panel-upgrade.service
-  jq . /etc/hy2panel/upgrade.result
+  jq . "${BASE}/upgrade.result"
 }
 
 dispatch() {
   case ${1:-} in
+    install) install_panel ;;
     status) status ;;
     info) info ;;
     logs) shift; logs "${1:-panel}" ;;
     restart) shift; restart_services "${1:-all}" ;;
     check) check_config ;;
     passwd) reset_password ;;
-    backup) require_root; shift; /usr/local/sbin/hy2panel-backup "${1:-}" ;;
-    restore) require_root; shift; [[ -n ${1:-} ]] || { usage; exit 2; }; /usr/local/sbin/hy2panel-restore "$1" ;;
+    backup) require_installed; require_root; shift; /usr/local/sbin/hy2panel-backup "${1:-}" ;;
+    restore) require_installed; require_root; shift; [[ -n ${1:-} ]] || { usage; exit 2; }; /usr/local/sbin/hy2panel-restore "$1" ;;
     sing-box) shift; sing_box "$@" ;;
     update) request_update ;;
-    uninstall) require_root; shift; /usr/local/sbin/hy2panel-uninstall "$@" ;;
+    uninstall) require_installed; require_root; shift; /usr/local/sbin/hy2panel-uninstall "$@" ;;
     help|-h|--help) usage ;;
     '') [[ -t 0 ]] && menu || usage ;;
     *) usage; exit 2 ;;

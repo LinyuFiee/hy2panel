@@ -1,23 +1,6 @@
 #!/usr/bin/env bash
+# 兼容入口。安装逻辑已并入 hy2，此处仅获取最新 hy2 并转交 hy2 install。
 set -Eeuo pipefail
-
-if [[ ${EUID} -ne 0 ]]; then
-  if [[ ${HY2PANEL_NONINTERACTIVE:-0} == 1 ]]; then
-    if command -v sudo >/dev/null 2>&1; then
-      exec sudo -E bash "$0" "$@"
-    fi
-    printf '非交互安装需要 root，且系统未提供 sudo。\n' >&2
-    exit 1
-  fi
-  if [[ -r /dev/tty && -w /dev/tty ]] && command -v sudo >/dev/null 2>&1; then
-    read -r -p '安装需要 root 权限，是否使用 sudo 获取？[Y/n] ' allow_root < /dev/tty
-    if [[ ! ${allow_root:-Y} =~ ^[Nn]$ ]]; then
-      exec sudo -E bash "$0" "$@"
-    fi
-  fi
-  printf '未获得 root 权限，安装已取消；普通只读命令仍可在安装完成后使用。\n' >&2
-  exit 1
-fi
 
 REPOSITORY="${HY2PANEL_REPOSITORY:-LinyuFiee/hy2panel}"
 if [[ ! ${REPOSITORY} =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
@@ -25,159 +8,12 @@ if [[ ! ${REPOSITORY} =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   exit 1
 fi
 
-if [[ -n ${HY2PANEL_VERSION:-} ]]; then
-  printf 'HY2PANEL_VERSION 已不再支持（检测到 %s）：安装器始终下载最新稳定 Release，仅接受 0.6.1 及以上版本。\n' "${HY2PANEL_VERSION}" >&2
-  exit 1
-fi
+target="$(mktemp)"
+curl -fsSL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 120 \
+  "https://raw.githubusercontent.com/${REPOSITORY}/main/scripts/hy2" -o "${target}"
+bash -n "${target}"
 
-source /etc/os-release
-if [[ ${ID} != debian || ${VERSION_ID} != 12 ]]; then
-  printf '一键安装仅支持 Debian 12。\n' >&2
-  exit 1
-fi
-
-INTERACTIVE=0
-if [[ ${HY2PANEL_NONINTERACTIVE:-0} != 1 && -r /dev/tty && -w /dev/tty ]]; then
-  INTERACTIVE=1
-fi
-PROMPTED=0
-MISSING=0
-
-ask_value() {
-  local variable=$1
-  local prompt=$2
-  local default_value=${3:-}
-  local value
-  if [[ -n ${!variable:-} ]]; then
-    return
-  fi
-  if [[ ${INTERACTIVE} -eq 0 ]]; then
-    printf '缺少必填配置 %s。非交互安装请通过环境变量提供。\n' "${variable}" >&2
-    MISSING=1
-    return
-  fi
-  if [[ -n ${default_value} ]]; then
-    read -r -p "${prompt} [${default_value}]: " value < /dev/tty
-  else
-    read -r -p "${prompt}: " value < /dev/tty
-  fi
-  value="${value:-${default_value}}"
-  if [[ -z ${value} ]]; then
-    printf '%s 不能为空。\n' "${variable}" >&2
-    MISSING=1
-    return
-  fi
-  printf -v "${variable}" '%s' "${value}"
-  PROMPTED=1
-}
-
-ask_optional() {
-  local variable=$1
-  local prompt=$2
-  local default_value=${3:-}
-  local value
-  if [[ -n ${!variable:-} || ${INTERACTIVE} -eq 0 ]]; then
-    return
-  fi
-  if [[ -n ${default_value} ]]; then
-    read -r -p "${prompt} [${default_value}]: " value < /dev/tty
-  else
-    read -r -p "${prompt}: " value < /dev/tty
-  fi
-  printf -v "${variable}" '%s' "${value:-${default_value}}"
-  PROMPTED=1
-}
-
-ask_secret() {
-  local variable=$1
-  local prompt=$2
-  local value
-  if [[ -n ${!variable:-} || ${INTERACTIVE} -eq 0 ]]; then
-    return
-  fi
-  read -r -s -p "${prompt}: " value < /dev/tty
-  printf '\n' > /dev/tty
-  printf -v "${variable}" '%s' "${value}"
-  PROMPTED=1
-}
-
-DEFAULT_PUBLIC_HOST="${PUBLIC_HOST:-}"
-if [[ -z ${DEFAULT_PUBLIC_HOST} ]]; then
-  DEFAULT_PUBLIC_HOST="$(hostname -I)"
-  DEFAULT_PUBLIC_HOST="${DEFAULT_PUBLIC_HOST%% *}"
-fi
-
-if [[ ${INTERACTIVE} -eq 1 ]]; then
-  printf '\n\033[1;32mhy2panel 交互式安装\033[0m\n'
-  printf '直接回车接受默认值；RackNerd 凭据可留空，稍后在面板配置。\n\n'
-fi
-
-ask_value PANEL_DOMAIN '面板域名，例如 panel.example.com'
-ask_value HY2_DOMAIN 'Hysteria2 证书域名，例如 hy2.example.com'
-ask_value PUBLIC_HOST 'Reality 公网地址' "${DEFAULT_PUBLIC_HOST}"
-ask_optional ACME_EMAIL '证书通知邮箱（可留空）'
-ask_secret RACKNERD_API_KEY 'RackNerd API Key（可留空）'
-ask_secret RACKNERD_API_HASH 'RackNerd API Hash（可留空）'
-
-if [[ ${MISSING} -ne 0 ]]; then
-  exit 1
-fi
-if [[ -n ${RACKNERD_API_KEY:-} && -z ${RACKNERD_API_HASH:-} || -z ${RACKNERD_API_KEY:-} && -n ${RACKNERD_API_HASH:-} ]]; then
-  printf 'RackNerd API Key 和 Hash 必须同时填写，或同时留空。\n' >&2
-  exit 1
-fi
-
-export PANEL_DOMAIN HY2_DOMAIN PUBLIC_HOST ACME_EMAIL RACKNERD_API_KEY RACKNERD_API_HASH
-
-if [[ ${PROMPTED} -eq 1 ]]; then
-  printf '\n安装摘要\n面板: https://%s:8443\nReality: %s\nHysteria2: %s\n访问方式: 公网 HTTPS + 管理员密码\n' "${PANEL_DOMAIN}" "${PUBLIC_HOST}" "${HY2_DOMAIN}"
-  read -r -p '确认开始安装？[Y/n] ' CONFIRM < /dev/tty
-  if [[ ${CONFIRM:-Y} =~ ^[Nn]$ ]]; then
-    printf '已取消安装。\n'
-    exit 0
-  fi
-fi
-
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y ca-certificates curl tar gzip coreutils
-
-WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
-
-verify_sha256_file() {
-  local checksum_file=$1 expected_name=$2 directory=$3
-  local digest marker filename actual file_size expected_size
-  local -a checksum_lines=()
-  [[ ${expected_name} =~ ^[A-Za-z0-9._-]+$ ]] || return 1
-  [[ -f ${checksum_file} && ! -L ${checksum_file} ]] || return 1
-  [[ -f ${directory}/${expected_name} && ! -L ${directory}/${expected_name} ]] || return 1
-  file_size="$(wc -c < "${checksum_file}")" || return 1
-  expected_size=$((64 + 2 + ${#expected_name} + 1))
-  [[ ${file_size} -eq ${expected_size} || ${file_size} -eq $((expected_size + 1)) ]] || return 1
-  mapfile -t checksum_lines < "${checksum_file}"
-  [[ ${#checksum_lines[@]} -eq 1 ]] || return 1
-  checksum_lines[0]="${checksum_lines[0]%$'\r'}"
-  [[ ${checksum_lines[0]} =~ ^([0-9a-f]{64})(\ \ |\ \*)([^/\\]+)$ ]] || return 1
-  digest=${BASH_REMATCH[1]}
-  marker=${BASH_REMATCH[2]}
-  filename=${BASH_REMATCH[3]}
-  [[ ${marker} == "  " || ${marker} == " *" ]] || return 1
-  [[ ${filename} == "${expected_name}" ]] || return 1
-  actual="$(sha256sum "${directory}/${expected_name}" | cut -d' ' -f1)" || return 1
-  [[ ${actual} == "${digest}" ]]
-}
-
-BASE_URL="https://github.com/${REPOSITORY}/releases/latest/download"
-BUNDLE=hy2panel-bundle-linux-amd64.tar.gz
-curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${BASE_URL}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
-curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${BASE_URL}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
-verify_sha256_file "${WORK_DIR}/${BUNDLE}.sha256" "${BUNDLE}" "${WORK_DIR}"
-mkdir "${WORK_DIR}/bundle"
-while IFS= read -r member; do
-  member="${member#./}"
-  [[ -z ${member} ]] && continue
-  [[ ${member} != /* && ${member} != ".." && ${member} != ../* && ${member} != */../* && ${member} != */.. ]]
-done < <(tar -tzf "${WORK_DIR}/${BUNDLE}")
-tar -xzf "${WORK_DIR}/${BUNDLE}" -C "${WORK_DIR}/bundle" --no-same-owner --no-same-permissions
-bash "${WORK_DIR}/bundle/scripts/install.sh"
+status=0
+bash "${target}" install || status=$?
+rm -f "${target}"
+exit "${status}"
