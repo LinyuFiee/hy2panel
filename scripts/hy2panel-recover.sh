@@ -17,31 +17,22 @@ write_result() {
   temporary="$(mktemp "${BASE}/.upgrade-result.XXXXXX")"
   jq -n --arg id "${operation_id}" --arg status "${status}" --arg phase "${phase}" --arg target "${target}" --arg message "${message}" --argjson restored "${rollback_succeeded}" \
     '{schema:1,id:$id,status:$status,phase:$phase,target_version:$target,message:$message,rollback:{attempted:true,succeeded:$restored}}' > "${temporary}"
-  chown hy2panel:hy2panel "${temporary}"
   chmod 600 "${temporary}"
-  sync -f "${temporary}" 2>/dev/null || true
-  mv -f "${temporary}" "${RESULT}"
+  chown hy2panel:hy2panel "${temporary}"
+  sync -f "${BASE}" 2>/dev/null || true
+  mv -fT -- "${temporary}" "${RESULT}"
 }
 
 restore_snapshot() {
   [[ -d ${ACTIVE}/snapshot ]] || return 1
-  local snapshot="${ACTIVE}/snapshot" path record exists backup mode owner group failed=0
+  local snapshot="${ACTIVE}/snapshot" path record exists backup failed=0
   if [[ -f ${snapshot}/managed.json ]]; then
     while IFS= read -r record; do
       path="$(jq -r '.path' <<<"${record}")"
       exists="$(jq -r '.exists' <<<"${record}")"
       backup="$(jq -r '.backup // ""' <<<"${record}")"
-      mode="$(jq -r '.mode // ""' <<<"${record}")"
-      owner="$(jq -r '.owner // ""' <<<"${record}")"
-      group="$(jq -r '.group // ""' <<<"${record}")"
       if [[ ${exists} == true ]]; then
-        install -d -o root -g root -m 755 "$(dirname -- "${path}")"
-        rm -rf -- "${path}"
-        cp -a "${snapshot}/files/${backup}" "${path}" || failed=1
-        if [[ -n ${mode} && ! -L ${path} ]]; then
-          chmod "${mode}" "${path}" || failed=1
-        fi
-        [[ -z ${owner} || -z ${group} ]] || chown -h "${owner}:${group}" "${path}" || failed=1
+        hy2panel_restore_snapshot_entry "${snapshot}/files/${backup}" "${path}" || failed=1
       else
         rm -rf "${path}" || failed=1
       fi
@@ -77,11 +68,6 @@ restore_snapshot() {
 if [[ ! -f ${ACTIVE}/journal.json ]]; then
   exit 0
 fi
-STATUS="$(jq -r '.status // ""' "${ACTIVE}/journal.json")"
-if [[ ${STATUS} != running ]]; then
-  exit 0
-fi
-
 if ! hy2panel_lock_maintenance; then
   exit 0
 fi
@@ -89,6 +75,12 @@ if ! hy2panel_lock_runtime; then
   exit 0
 fi
 
+[[ -f ${ACTIVE}/journal.json ]] || exit 0
+case $(jq -r '.status // ""' "${ACTIVE}/journal.json") in
+  running | rolling_back) ;;
+  *) exit 0 ;;
+esac
+hy2panel_prepare_config_dir
 if restore_snapshot; then
   jq '.status="rolled_back" | .phase="recovery" | .finished_at=(now|todateiso8601)' "${ACTIVE}/journal.json" > "${ACTIVE}/journal.tmp"
   mv "${ACTIVE}/journal.tmp" "${ACTIVE}/journal.json"

@@ -40,15 +40,36 @@ export function nodeConfigFingerprint(config) {
   return JSON.stringify(normalizedDraft(config))
 }
 
+// Shared by the draft and its remountable view, never serialized into the payload.
+const toggleHistory = new WeakMap()
+
+export function hysteriaToggleHistory(form) {
+  if (!toggleHistory.has(form)) {
+    toggleHistory.set(form, { passwords: new Map(), limitedRates: null, conflict: ref(false) })
+  }
+  return toggleHistory.get(form)
+}
+
+export function missingRate(hysteria, key) {
+  return hysteria.enabled && String(hysteria[key] ?? '').trim() === ''
+}
+
 export function useNodeDraft() {
   const form = reactive(clone(DEFAULT_FORM))
   const dirty = ref(false)
-  const conflict = ref(false)
+  const history = hysteriaToggleHistory(form)
+  const conflict = history.conflict
   let baseline = nodeConfigFingerprint(null)
   let lastIncoming = baseline
   let applying = false
 
+  function clearToggleHistory() {
+    history.passwords.clear()
+    history.limitedRates = null
+  }
+
   function replaceForm(next) {
+    clearToggleHistory()
     applying = true
     form.public_host = next.public_host
     for (const key of Object.keys(form.reality)) delete form.reality[key]
@@ -72,26 +93,31 @@ export function useNodeDraft() {
     const incoming = nodeConfigFingerprint(config)
     lastIncoming = incoming
     if (!dirty.value) {
-      accept(config)
+      // An unchanged poll is not a replacement, even if a toggle round-trip
+      // returned the effective configuration to its baseline.
+      if (incoming !== baseline) accept(config)
       return 'synced'
     }
     conflict.value = incoming !== baseline
     return conflict.value ? 'conflict' : 'preserved'
   }
 
-function toNumber(value) {
-  const text = String(value ?? '').trim()
-  return text === '' ? 0 : Number(text)
-}
+  watch(conflict, conflicted => {
+    if (conflicted) clearToggleHistory()
+  }, { flush: 'sync' })
 
-function payload() {
-  const draft = clone(form)
-  draft.reality.port = toNumber(draft.reality.port)
-  draft.hysteria2.port = toNumber(draft.hysteria2.port)
-  draft.hysteria2.up_mbps = toNumber(draft.hysteria2.up_mbps)
-  draft.hysteria2.down_mbps = toNumber(draft.hysteria2.down_mbps)
-  return draft
-}
+  function payload() {
+    const draft = clone(form)
+    const hysteria = draft.hysteria2
+    for (const [key, label] of [['up_mbps', '上传'], ['down_mbps', '下载']]) {
+      if (missingRate(hysteria, key)) throw new Error(`请填写服务器${label}带宽；不限速请填 0。`)
+      hysteria[key] = Number(hysteria[key] ?? 0)
+    }
+    draft.reality.port = Number(draft.reality.port ?? 0)
+    hysteria.port = Number(hysteria.port ?? 0)
+    if (!hysteria.obfs_type) hysteria.obfs_password = ''
+    return draft
+  }
 
   function reset() {
     replaceForm(clone(DEFAULT_FORM))

@@ -28,6 +28,7 @@ import (
 
 type Server struct {
 	store            *store.Store
+	subscriptions    *subscriptionStore
 	auth             *authenticator
 	applier          Applier
 	applyMu          sync.Mutex
@@ -69,6 +70,7 @@ type updateRequest struct {
 func New(store *store.Store, applier Applier) *Server {
 	return &Server{
 		store:          store,
+		subscriptions:  &subscriptionStore{path: subscriptionStatePath},
 		auth:           newAuthenticator(),
 		applier:        applier,
 		bbr:            FileBBRApplier{Dir: filepath.Dir(store.Path())},
@@ -141,6 +143,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.Handle("POST /api/logout", s.requireAuth(http.HandlerFunc(s.logout)))
 	mux.Handle("GET /api/state", s.requireAuth(http.HandlerFunc(s.state)))
+	mux.Handle("GET /api/subscription", s.requireAuth(http.HandlerFunc(s.subscriptionStatus)))
+	mux.Handle("POST /api/subscription", s.requireAuth(http.HandlerFunc(s.manageSubscription)))
+	mux.HandleFunc("GET /api/sub/{token}", s.subscriptionProfile)
 	mux.Handle("GET /api/system/status", s.requireAuth(http.HandlerFunc(s.systemStatus)))
 	mux.Handle("GET /api/traffic/live", s.requireAuth(http.HandlerFunc(s.trafficLive)))
 	mux.Handle("GET /api/traffic/history", s.requireAuth(http.HandlerFunc(s.trafficHistory)))
@@ -309,6 +314,12 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
 			w.Header().Set("Cache-Control", "no-store")
+			// Reject malformed bearer paths before ServeMux redirects them or
+			// the static file handler removes cache headers from its 404.
+			if malformedSubscriptionPath(r.URL) {
+				http.NotFound(w, r)
+				return
+			}
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -76,6 +76,8 @@ function replaceObject(target, source) {
 }
 
 let mockTick = 0
+let mockSubscription = ''
+let mockSubscriptionGeneration = 0
 let operationPhaseTimer
 let operationCompleteTimer
 
@@ -167,6 +169,8 @@ export default defineConfig({
             clearTimeout(operationPhaseTimer)
             clearTimeout(operationCompleteTimer)
             mockTick = 0
+            mockSubscription = ''
+            mockSubscriptionGeneration = 0
             replaceObject(mockState, initialMockState)
             replaceObject(mockTraffic, initialMockTraffic)
             replaceObject(singBoxVersions, initialSingBoxVersions)
@@ -175,6 +179,35 @@ export default defineConfig({
           }
           if (req.url === '/api/logout') {
             res.end('{"status":"ok"}')
+            return
+          }
+          if (req.url.startsWith('/api/sub/')) {
+            res.setHeader('Cache-Control', 'no-store')
+            res.statusCode = 404
+            res.end('{"error":"开发预览不提供可用的远程配置"}')
+            return
+          }
+          if (req.url === '/api/subscription') {
+            res.setHeader('Cache-Control', 'no-store')
+            if (req.method === 'GET') {
+              res.end(JSON.stringify({ enabled: Boolean(mockSubscription) }))
+              return
+            }
+            let body = ''
+            req.on('data', chunk => { body += chunk })
+            req.on('end', () => {
+              let action
+              try { action = JSON.parse(body).action } catch {}
+              if (action === 'revoke') mockSubscription = ''
+              else if (action === 'rotate' || (action === 'create' && !mockSubscription)) {
+                mockSubscription = `https://panel.example.com:8443/api/sub/test-only-${++mockSubscriptionGeneration}`
+              } else if (!mockSubscription || !['create', 'copy'].includes(action)) {
+                res.statusCode = 409
+                res.end('{"error":"订阅地址不可用"}')
+                return
+              }
+              res.end(JSON.stringify({ enabled: Boolean(mockSubscription), url: mockSubscription || undefined }))
+            })
             return
           }
           if (req.url === '/api/system/status') {
@@ -243,15 +276,20 @@ export default defineConfig({
             return
           }
           if (req.url === '/api/diagnostics') {
-            res.end(JSON.stringify({ checked_at: new Date().toISOString(), pass: 7, warn: 1, fail: 0, checks: [
+            const { reality, hysteria2 } = mockState.config
+            const checks = [
               { id: 'config', name: 'sing-box 配置', status: 'pass', message: '配置语法与协议字段校验通过' },
               { id: 'service', name: '核心服务', status: 'pass', message: 'sing-box.service 正在运行' },
-              { id: 'reality-listen', name: 'Reality 监听', status: 'pass', message: 'TCP 443 正在监听' },
-              { id: 'hy2-listen', name: 'Hysteria2 监听', status: 'pass', message: 'UDP 443 正在监听' },
+              ...(reality.enabled ? [{ id: 'reality-listen', name: 'Reality 监听', status: 'pass', message: `TCP ${reality.port} 正在监听` }] : []),
+              ...(hysteria2.enabled ? [
+                { id: 'hy2-listen', name: 'Hysteria2 监听', status: 'pass', message: `UDP ${hysteria2.port} 正在监听` },
+                { id: 'certificate', name: '节点证书', status: 'pass', message: '节点证书在有效期内，且与 HY2 域名匹配' },
+                { id: 'dns', name: '域名解析', status: 'warn', message: '模拟提醒：请核对解析记录', suggestion: '检查 DNS 服务商解析。' }
+              ] : []),
               { id: 'bbr', name: 'BBR 网络优化', status: 'pass', message: 'BBR + fq 已启用' },
-              { id: 'external', name: '外部连通性', status: 'info', message: '本机无法判断运营商或 GFW 是否封堵端口', suggestion: '使用客户端或外部 TCP/UDP 探测复核。' },
-              { id: 'dns', name: '域名解析', status: 'warn', message: '模拟提醒：请核对解析记录', suggestion: '检查 DNS 服务商解析。' }
-            ] }))
+              { id: 'external', name: '外部连通性', status: 'info', message: '本机不能确认客户端实际连通性', suggestion: '在设备上分别测试已启用的协议。' }
+            ]
+            res.end(JSON.stringify({ checked_at: new Date().toISOString(), pass: checks.filter(c => c.status === 'pass').length, warn: checks.filter(c => c.status === 'warn').length, fail: 0, checks }))
             return
           }
           if (req.url === '/api/settings/recovery') {
@@ -271,7 +309,7 @@ export default defineConfig({
                 const payload = JSON.parse(body)
                 mockState.config.reality = { ...mockState.config.reality, ...payload.reality }
                 mockState.config.hysteria2 = { ...mockState.config.hysteria2, ...payload.hysteria2 }
-                if (typeof payload.public_host === 'string') mockState.config.public_host = payload.public_host
+                if (typeof payload.public_host === 'string') mockState.config.panel.public_host = payload.public_host
               } catch {}
               res.end(JSON.stringify(mockState))
             })

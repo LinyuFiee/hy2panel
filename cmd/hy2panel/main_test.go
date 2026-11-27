@@ -69,6 +69,29 @@ func TestRunInitAdminIPIsOptionalAndIgnored(t *testing.T) {
 	}
 }
 
+func TestRunRenderCustomPaths(t *testing.T) {
+	cfg, err := config.Initial("panel.example.com", "", "203.0.113.10", "", "test-password-123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	input, output := filepath.Join(dir, "panel.json"), filepath.Join(dir, "sing-box.pending.json")
+	if err := store.New(input).Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRender([]string{"--config", input, "--output", output}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := cfg.SingBoxJSON()
+	if err != nil || !bytes.Equal(got, append(want, '\n')) {
+		t.Fatal("render did not produce the expected candidate")
+	}
+}
+
 func TestRunMigrateIsIdempotent(t *testing.T) {
 	cfg, err := config.Initial("panel.example.com", "", "203.0.113.10", "", "test-password-123456")
 	if err != nil {

@@ -71,10 +71,7 @@ write_operation() {
   sync -f "${temporary}" 2>/dev/null || true
   mv -f "${temporary}" "${STATE}"
   if [[ ${status} != running ]]; then
-    cp "${STATE}" "${RESULT}.tmp"
-    chown hy2panel:hy2panel "${RESULT}.tmp"
-    chmod 600 "${RESULT}.tmp"
-    mv -f "${RESULT}.tmp" "${RESULT}"
+    hy2panel_atomic_copy "${STATE}" "${RESULT}" hy2panel hy2panel 600
   fi
 }
 
@@ -236,6 +233,9 @@ run_initial_install() {
     write_operation failed_no_change '另一个维护任务正在运行'
     exit 1
   fi
+  # v0.8.0 has already reset /etc/hy2panel to root:root 0755 when
+  # it invokes this newly installed helper, before migrate/render/apply.
+  hy2panel_prepare_config_dir
   WORK_DIR="$(mktemp -d "${TRANSACTIONS}/sing-box.XXXXXX")"
   migrate_legacy
   local old_current

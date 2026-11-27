@@ -312,12 +312,13 @@ const speedButtonLabel = computed(() => {
         <article class="card">
           <header class="card-head">
             <div class="card-title">
-              <h3>服务器测速</h3>
-              <small>LibreSpeed · 按需运行</small>
+              <h3>VPS 到测速站</h3>
+              <small>测量服务器出口，不代表客户端经 HY2 或 Reality 的速度。</small>
             </div>
             <Badge v-if="speedtest.running || starting" variant="warning">运行中</Badge>
-            <Badge v-else-if="speedtest.result" variant="success">最近完成</Badge>
-            <Badge v-else variant="secondary">空闲</Badge>
+            <Badge v-else-if="speedtest.error" variant="destructive">最近一次失败</Badge>
+            <Badge v-else-if="speedtest.result" variant="success">已完成</Badge>
+            <Badge v-else variant="secondary">未测试</Badge>
           </header>
           <div class="card-body service-body">
             <div v-if="speedtest.result && !speedtest.running && !starting" class="speed-readout">
@@ -333,14 +334,14 @@ const speedButtonLabel = computed(() => {
                 <div><dt>延迟</dt><dd>{{ Number(speedtest.result.ping || 0).toFixed(1) }} ms</dd></div>
                 <div><dt>抖动</dt><dd>{{ Number(speedtest.result.jitter || 0).toFixed(1) }} ms</dd></div>
               </dl>
-              <p>{{ speedtest.result.server_name || 'LibreSpeed' }} · 本次耗流 {{ formatBytes(sumBytes(speedtest.result.bytes_sent, speedtest.result.bytes_received)) }}</p>
+              <p>上次成功：{{ speedtest.result.timestamp && !speedtest.result.timestamp.startsWith('0001-') ? formatTimestamp(speedtest.result.timestamp, true) : '时间未知' }} · {{ speedtest.result.server_name || '测速站未知' }} · 耗流 {{ formatBytes(sumBytes(speedtest.result.bytes_sent, speedtest.result.bytes_received)) }}</p>
             </div>
 
             <div v-else-if="speedtest.running || starting" class="speed-running" role="status" aria-live="polite">
               <LoaderCircle class="loading-icon" :size="24" aria-hidden="true" />
               <div>
                 <strong>{{ starting && !speedtest.running ? '正在连接测速节点' : '正在测量服务器链路' }}</strong>
-                <span>下载 {{ formatMbps(speedtest.live?.download_mbps) }} Mbps · 上传 {{ formatMbps(speedtest.live?.upload_mbps) }} Mbps</span>
+                <span>网卡采样：↓ {{ formatMbps(speedtest.live?.download_mbps) }} Mbps · ↑ {{ formatMbps(speedtest.live?.upload_mbps) }} Mbps</span>
               </div>
             </div>
 

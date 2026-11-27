@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { hysteriaToggleHistory, missingRate } from '@/composables/useNodeDraft'
 import {
   AlertTriangle,
   Check,
@@ -41,7 +42,7 @@ import {
   DialogHeader,
   DialogTitle
 } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Spinner } from '@/components/ui/spinner'
@@ -77,13 +78,15 @@ let qrRevision = 0
 const realityName = computed(() => props.meta?.reality_name || 'VLESS Reality')
 const hysteria2Name = computed(() => props.meta?.hysteria2_name || 'Hysteria2')
 const dirtyKnown = computed(() => typeof props.dirty === 'boolean')
-const saveDisabled = computed(() => props.saving || props.conflict || props.dirty === false)
+const history = computed(() => hysteriaToggleHistory(props.form))
+const conflict = computed(() => props.conflict || history.value.conflict.value)
+const saveDisabled = computed(() => props.saving || conflict.value || props.dirty === false)
 const credentialLink = computed(() => credentialProtocol.value ? (props.links?.[credentialProtocol.value] || '') : '')
 const credentialName = computed(() => credentialProtocol.value === 'reality' ? realityName.value : hysteria2Name.value)
 const pendingDisableName = computed(() => pendingDisable.value === 'reality' ? 'Reality' : 'Hysteria2')
 
 const saveState = computed(() => {
-  if (props.conflict) return { tone: 'danger', title: '检测到配置冲突', detail: '远端配置已更新，当前草稿不会覆盖新配置。' }
+  if (conflict.value) return { tone: 'danger', title: '检测到配置冲突', detail: '远端配置已更新，当前草稿不会覆盖新配置。' }
   if (props.saving) return { tone: 'progress', title: '正在校验并应用', detail: '启动失败时服务端会自动恢复上一版配置。' }
   if (dirtyKnown.value && !props.dirty) return { tone: 'clean', title: '配置已同步', detail: '修改后即可保存并应用。' }
   if (props.dirty) return { tone: 'dirty', title: '有未保存的修改', detail: '保存后会校验配置并重启节点服务。' }
@@ -99,23 +102,22 @@ function updateNumber(target, key, value) {
   target[key] = text === '' ? '' : Number(text)
 }
 
-const unlimitedBandwidth = computed(() => formBandwidthUnlimited())
+const rateFields = [
+  { key: 'up_mbps', id: 'hysteria-up', label: '服务器上传 Mbps', hint: '0 表示不限速。' },
+  { key: 'down_mbps', id: 'hysteria-down', label: '服务器下载 Mbps', hint: '填略高于实测链路的值，过大会加剧拥塞。' }
+]
+const unlimitedBandwidth = computed(() => props.form.hysteria2.up_mbps === 0 && props.form.hysteria2.down_mbps === 0)
 
-function formBandwidthUnlimited() {
-  const hysteria = props.form?.hysteria2
-  if (!hysteria) return false
-  return hysteria.up_mbps === 0 && hysteria.down_mbps === 0
-}
-
-function setUnlimitedBandwidth(value) {
+function setUnlimitedBandwidth(unlimited) {
   const hysteria = props.form.hysteria2
-  if (value === true) {
+  if (unlimited) {
+    history.value.limitedRates = { up_mbps: hysteria.up_mbps, down_mbps: hysteria.down_mbps }
     hysteria.up_mbps = 0
     hysteria.down_mbps = 0
-    return
+  } else {
+    Object.assign(hysteria, history.value.limitedRates ?? { up_mbps: 100, down_mbps: 100 })
+    history.value.limitedRates = null
   }
-  if (hysteria.up_mbps === 0) hysteria.up_mbps = 100
-  if (hysteria.down_mbps === 0) hysteria.down_mbps = 100
 }
 
 function randomObfsPassword() {
@@ -126,15 +128,13 @@ function randomObfsPassword() {
 
 function setObfsType(value) {
   const hysteria = props.form.hysteria2
+  const passwords = history.value.passwords
+  const previous = hysteria.obfs_type
+  if (previous) passwords.set(previous, hysteria.obfs_password)
+  const password = passwords.get(value) || (previous && hysteria.obfs_password)
   hysteria.obfs_type = value
-  if (!value) {
-    hysteria.obfs_password = ''
-    showObfsPassword.value = false
-    return
-  }
-  if (!hysteria.obfs_password) {
-    hysteria.obfs_password = randomObfsPassword()
-  }
+  hysteria.obfs_password = value ? password || randomObfsPassword() : ''
+  showObfsPassword.value = false
 }
 
 function requestProtocolToggle(protocol, nextValue) {
@@ -214,8 +214,16 @@ function handleCredentialDialog(open) {
   credentialProtocol.value = ''
 }
 
-function handleSubmit() {
+function handleSubmit(event) {
   if (saveDisabled.value) return
+  const missing = rateFields.find(field => missingRate(props.form.hysteria2, field.key))
+  if (missing) {
+    const formElement = event.currentTarget
+    hysteriaAdvancedOpen.value = true
+    // Collapsible mounts its inputs after the Vue update; focus once they are visible.
+    requestAnimationFrame(() => formElement.elements.namedItem(missing.id)?.focus())
+    return
+  }
   showRealityPrivateKey.value = false
   showHysteriaPassword.value = false
   showObfsPassword.value = false
@@ -420,18 +428,19 @@ onBeforeUnmount(invalidateQr)
                   </Field>
                   <Field class="field">
                     <FieldLabel for="hysteria-unlimited">不限速</FieldLabel>
-                    <Switch id="hysteria-unlimited" :model-value="unlimitedBandwidth" :disabled="saving || !form.hysteria2.enabled" aria-label="Hysteria2 不限速" @update:model-value="setUnlimitedBandwidth" />
+                    <Switch id="hysteria-unlimited" :model-value="unlimitedBandwidth" :disabled="saving || conflict || !form.hysteria2.enabled" aria-label="Hysteria2 不限速" @update:model-value="setUnlimitedBandwidth" />
                     <FieldDescription>开启后不声明带宽，由客户端拥塞控制自行探测；关闭时按填写的 Mbps 作为上限提示。</FieldDescription>
                   </Field>
-                  <Field class="field">
-                    <FieldLabel for="hysteria-up">服务器上传 Mbps</FieldLabel>
-                    <Input id="hysteria-up" :model-value="form.hysteria2.up_mbps" type="number" min="0" max="10000" inputmode="numeric" aria-label="服务器上传 Mbps" :disabled="saving || unlimitedBandwidth" :required="form.hysteria2.enabled && !unlimitedBandwidth" @update:model-value="updateNumber(form.hysteria2, 'up_mbps', $event)" />
-                    <FieldDescription>0 表示不限速。</FieldDescription>
-                  </Field>
-                  <Field class="field">
-                    <FieldLabel for="hysteria-down">服务器下载 Mbps</FieldLabel>
-                    <Input id="hysteria-down" :model-value="form.hysteria2.down_mbps" type="number" min="0" max="10000" inputmode="numeric" aria-label="服务器下载 Mbps" :disabled="saving || unlimitedBandwidth" :required="form.hysteria2.enabled && !unlimitedBandwidth" @update:model-value="updateNumber(form.hysteria2, 'down_mbps', $event)" />
-                    <FieldDescription>填略高于实测链路的值，过大会加剧拥塞。</FieldDescription>
+                  <Field v-for="field in rateFields" :key="field.key" class="field">
+                    <FieldLabel :for="field.id">{{ field.label }}</FieldLabel>
+                    <Input
+                      :id="field.id" :model-value="form.hysteria2[field.key]" type="number" min="0" max="10000" inputmode="numeric"
+                      :disabled="saving || unlimitedBandwidth" :required="hysteriaAdvancedOpen && form.hysteria2.enabled && !unlimitedBandwidth"
+                      :aria-invalid="missingRate(form.hysteria2, field.key) || undefined" :aria-describedby="`${field.id}-help`"
+                      @update:model-value="updateNumber(form.hysteria2, field.key, $event)"
+                    />
+                    <FieldError v-if="missingRate(form.hysteria2, field.key)" :id="`${field.id}-help`">请填写带宽；不限速请填 0。</FieldError>
+                    <FieldDescription v-else :id="`${field.id}-help`">{{ field.hint }}</FieldDescription>
                   </Field>
                   <Field class="field">
                     <FieldLabel for="hysteria-bbr">BBR 拥塞档位</FieldLabel>
@@ -444,7 +453,7 @@ onBeforeUnmount(invalidateQr)
                   </Field>
                   <Field class="field">
                     <FieldLabel for="hysteria-obfs">QUIC 混淆</FieldLabel>
-                    <NativeSelect id="hysteria-obfs" :model-value="form.hysteria2.obfs_type" :disabled="saving" aria-label="Hysteria2 QUIC 混淆" @update:model-value="setObfsType">
+                    <NativeSelect id="hysteria-obfs" :model-value="form.hysteria2.obfs_type" :disabled="saving || conflict" aria-label="Hysteria2 QUIC 混淆" @update:model-value="setObfsType">
                       <NativeSelectOption value="">关闭</NativeSelectOption>
                       <NativeSelectOption value="salamander">salamander</NativeSelectOption>
                       <NativeSelectOption value="gecko">gecko</NativeSelectOption>

@@ -16,7 +16,30 @@ PHASE=requested
 SNAPSHOT_READY=0
 ROLLING_BACK=0
 
-source /usr/local/lib/hy2panel/hy2panel-transaction.sh
+V080_STAGE=""
+unset HY2PANEL_BASE HY2PANEL_MAINTENANCE_LOCK HY2PANEL_RUNTIME_LOCK
+if (( $# == 0 )); then
+  source /usr/local/lib/hy2panel/hy2panel-transaction.sh
+else
+  [[ $# == 2 && $1 == --from-v080 && $2 =~ ^/run/hy2panel-v080\.[a-zA-Z0-9]{8}$ && ${EUID} == 0 ]] || exit 2
+  V080_STAGE=$2
+  [[ -d ${V080_STAGE} && ! -L ${V080_STAGE} && $(stat -c '%u:%a' -- "${V080_STAGE}") == 0:700 ]] || exit 1
+  for file in "${BUNDLE}" "${BUNDLE}.sha256" upgrade.request hy2panel-transaction.sh; do
+    file="${V080_STAGE}/${file}"
+    [[ -f ${file} && ! -L ${file} && $(stat -c '%u:%h' -- "${file}") == 0:1 ]] || exit 1
+    (( (8#$(stat -c '%a' -- "${file}") & 022) == 0 )) || exit 1
+  done
+  REQUEST="${V080_STAGE}/upgrade.request"
+  unset HY2PANEL_MAINTENANCE_LOCK_HELD HY2PANEL_RUNTIME_LOCK_HELD
+  # shellcheck source=scripts/lib/hy2panel-transaction.sh
+  source "${V080_STAGE}/hy2panel-transaction.sh"
+  # This entry point is a separate process, not a child of the old updater.
+  # Check the live baseline and private target under the real maintenance lock.
+  hy2panel_lock_maintenance || exit 1
+  jq -e '.schema == 1 and .action == "upgrade" and .target_version == "0.9.0" and (.id | type == "string" and length >= 16 and length <= 128)' "${REQUEST}" >/dev/null
+  [[ -f /usr/local/bin/hy2panel && ! -L /usr/local/bin/hy2panel && $(stat -c '%u:%g:%a' /usr/local/bin/hy2panel) == 0:0:755 ]] || exit 1
+  /usr/local/bin/hy2panel version --json | jq -e '.version == "0.8.0"' >/dev/null
+fi
 
 managed_paths=(
   /usr/local/bin/hy2panel
@@ -75,10 +98,10 @@ atomic_json_result() {
   temporary="$(mktemp "${BASE}/.upgrade-result.XXXXXX")"
   jq -n --arg id "${OPERATION_ID}" --arg status "${status}" --arg phase "${PHASE}" --arg target "${TARGET_VERSION}" --arg message "${message}" --argjson attempted "${rollback_attempted}" --argjson restored "${rollback_succeeded}" \
     '{schema:1,id:$id,status:$status,phase:$phase,target_version:$target,message:$message,rollback:{attempted:$attempted,succeeded:$restored}}' > "${temporary}"
-  chown hy2panel:hy2panel "${temporary}"
   chmod 600 "${temporary}"
-  sync -f "${temporary}" 2>/dev/null || true
-  mv -f "${temporary}" "${RESULT}"
+  chown hy2panel:hy2panel "${temporary}"
+  sync -f "${BASE}" 2>/dev/null || true
+  mv -fT -- "${temporary}" "${RESULT}"
 }
 
 write_journal() {
@@ -140,25 +163,17 @@ record_snapshot() {
 }
 
 restore_snapshot() {
-  local snapshot="${ACTIVE}/snapshot" record path exists backup mode owner group failed=0 unit enabled active
+  local snapshot="${ACTIVE}/snapshot" record path exists backup failed=0 unit enabled active
   ROLLING_BACK=1
+  hy2panel_prepare_config_dir || return 1
   export HY2PANEL_MAINTENANCE_LOCK_HELD=1 HY2PANEL_RUNTIME_LOCK_HELD=1
   systemctl stop hy2panel.service >/dev/null 2>&1 || true
   while IFS= read -r record; do
     path="$(jq -r '.path' <<<"${record}")"
     exists="$(jq -r '.exists' <<<"${record}")"
     backup="$(jq -r '.backup' <<<"${record}")"
-    mode="$(jq -r '.mode' <<<"${record}")"
-    owner="$(jq -r '.owner' <<<"${record}")"
-    group="$(jq -r '.group' <<<"${record}")"
     if [[ ${exists} == true ]]; then
-      install -d -o root -g root -m 755 "$(dirname -- "${path}")"
-      rm -rf -- "${path}"
-      cp -a -- "${snapshot}/files/${backup}" "${path}" || failed=1
-      if [[ -n ${mode} && ! -L ${path} ]]; then
-        chmod "${mode}" "${path}" || failed=1
-      fi
-      [[ -z ${owner} || -z ${group} ]] || chown -h "${owner}:${group}" "${path}" || failed=1
+      hy2panel_restore_snapshot_entry "${snapshot}/files/${backup}" "${path}" || failed=1
     else
       rm -rf -- "${path}" || failed=1
     fi
@@ -208,11 +223,12 @@ rollback_on_error() {
     fi
   else
     PHASE=failed_no_change
-    [[ -d ${ACTIVE} ]] && write_journal failed_no_change '升级预检失败，现有系统未修改'
+    [[ -n ${WORK_DIR} && -d ${ACTIVE} ]] && write_journal failed_no_change '升级预检失败，现有系统未修改'
     atomic_json_result failed_no_change '升级预检失败，现有系统未修改' false false
   fi
   exit "${exit_code}"
 }
+hy2panel_prepare_config_dir
 trap rollback_on_error ERR INT TERM HUP
 
 cleanup() {
@@ -232,8 +248,12 @@ parse_request() {
 
 verify_bundle() {
   local base_url="https://github.com/${REPOSITORY}/releases/download/v${TARGET_VERSION}"
-  curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${base_url}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
-  curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${base_url}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
+  if [[ -n ${V080_STAGE} ]]; then
+    cp -- "${V080_STAGE}/${BUNDLE}" "${V080_STAGE}/${BUNDLE}.sha256" "${WORK_DIR}/"
+  else
+    curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 300 "${base_url}/${BUNDLE}" -o "${WORK_DIR}/${BUNDLE}"
+    curl -fL --proto '=https' --proto-redir '=https' --connect-timeout 20 --max-time 60 "${base_url}/${BUNDLE}.sha256" -o "${WORK_DIR}/${BUNDLE}.sha256"
+  fi
   hy2panel_verify_sha256_file "${WORK_DIR}/${BUNDLE}.sha256" "${BUNDLE}" "${WORK_DIR}"
   hy2panel_archive_members_safe "${WORK_DIR}/${BUNDLE}"
   mkdir "${WORK_DIR}/bundle"
@@ -243,12 +263,15 @@ verify_bundle() {
 }
 
 install_file() {
-  local source=$1 target=$2 mode=$3
-  install -d -o root -g root -m 755 "$(dirname -- "${target}")"
-  local temporary="${target}.new.${OPERATION_ID}"
-  install -o root -g root -m "${mode}" "${source}" "${temporary}"
+  local source=$1 target=$2 mode=$3 parent temporary
+  parent="$(dirname -- "${target}")"
+  [[ -d ${parent} ]] || install -d -o root -g root -m 755 "${parent}"
+  temporary="$(mktemp "${parent}/.upgrade.XXXXXX")"
+  cp -T -- "${source}" "${temporary}"
+  chown root:root "${temporary}"
+  chmod "${mode}" "${temporary}"
   sync -f "${temporary}" 2>/dev/null || true
-  mv -f "${temporary}" "${target}"
+  mv -fT -- "${temporary}" "${target}"
 }
 
 install_bundle() {
@@ -288,6 +311,14 @@ install -d -o root -g root -m 700 "${STATE_ROOT}" "${TRANSACTIONS}"
 if ! hy2panel_lock_maintenance; then
   atomic_json_result failed_no_change '另一个维护任务正在运行' false false
   exit 1
+fi
+# Do not discard a snapshot that still needs recovery or manual inspection.
+if [[ -f ${ACTIVE}/journal.json ]]; then
+  journal_status="$(jq -er '.status' "${ACTIVE}/journal.json")"
+  case ${journal_status} in
+    committed | failed_no_change | rolled_back) ;;
+    *) printf 'An unfinished upgrade requires recovery.\n' >&2; exit 1 ;;
+  esac
 fi
 systemctl stop hy2panel-upgrade.path >/dev/null 2>&1 || true
 if ! hy2panel_require_free_mb "${TRANSACTIONS}"; then

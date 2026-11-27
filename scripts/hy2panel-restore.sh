@@ -26,7 +26,8 @@ if ! hy2panel_lock_maintenance || ! hy2panel_lock_runtime; then
 fi
 
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "${WORK_DIR}"' EXIT
+CERT_STAGE=""
+trap 'rm -rf -- "${WORK_DIR}"; if [[ -n ${CERT_STAGE} ]]; then rm -rf -- "${CERT_STAGE}"; fi' EXIT
 hy2panel_archive_members_safe "${ARCHIVE}" || { printf '备份归档包含不安全成员。\n' >&2; exit 1; }
 tar -xzf "${ARCHIVE}" -C "${WORK_DIR}" --no-same-owner --no-same-permissions
 [[ -f ${WORK_DIR}/manifest.json && -f ${WORK_DIR}/checksums.txt && -f ${WORK_DIR}/etc/hy2panel/panel.json ]] || { printf '备份结构不完整。\n' >&2; exit 1; }
@@ -43,6 +44,7 @@ jq -e '.backup_format_version == 1 and (.config_version | type == "number")' "${
 )
 /usr/local/bin/hy2panel check --config "${WORK_DIR}/etc/hy2panel/panel.json"
 
+hy2panel_prepare_config_dir
 if [[ ${EMERGENCY_MODE} -eq 0 ]]; then
   EMERGENCY="/root/hy2panel-backups/pre-restore-$(date -u +%Y%m%d-%H%M%S).tar.gz"
   export HY2PANEL_MAINTENANCE_LOCK_HELD=1
@@ -65,20 +67,27 @@ if [[ ${EMERGENCY_MODE} -eq 0 ]]; then
   trap restore_failed ERR
 fi
 
-install -d -o hy2panel -g hy2panel -m 700 "${BASE}"
+# A subscription issued before restore must not expose the restored credentials.
+rm -f /var/lib/hy2panel/subscription.json
+# certs is a root-controlled child in a panel-writable sticky directory.
+if [[ ! -e ${BASE}/certs && ! -L ${BASE}/certs ]]; then
+  mkdir -m 700 -- "${BASE}/certs"
+fi
+[[ $(LC_ALL=C stat -c '%u:%F' -- "${BASE}/certs") == '0:directory' ]]
 install -d -o root -g hy2panel -m 750 "${BASE}/certs"
 hy2panel_atomic_copy "${WORK_DIR}/etc/hy2panel/panel.json" "${BASE}/panel.json" hy2panel hy2panel 600
 for name in domains.env 99-hy2panel.conf sysctl.backup; do
   [[ ! -f ${WORK_DIR}/etc/hy2panel/${name} ]] || hy2panel_atomic_copy "${WORK_DIR}/etc/hy2panel/${name}" "${BASE}/${name}" root root 600
 done
 if [[ -d ${WORK_DIR}/etc/hy2panel/certs ]]; then
-  rm -rf "${BASE}/certs.restore"
-  cp -a "${WORK_DIR}/etc/hy2panel/certs" "${BASE}/certs.restore"
-  chown -R root:hy2panel "${BASE}/certs.restore"
-  find "${BASE}/certs.restore" -type d -exec chmod 750 {} +
-  find "${BASE}/certs.restore" -type f -exec chmod 640 {} +
-  rm -rf "${BASE}/certs"
-  mv "${BASE}/certs.restore" "${BASE}/certs"
+  CERT_STAGE="$(mktemp -d "${BASE}/.restore.XXXXXX")"
+  cp -aT -- "${WORK_DIR}/etc/hy2panel/certs" "${CERT_STAGE}/certs"
+  chown -R root:hy2panel "${CERT_STAGE}/certs"
+  find "${CERT_STAGE}/certs" -type d -exec chmod 750 {} +
+  find "${CERT_STAGE}/certs" -type f -exec chmod 640 {} +
+  rm -rf -- "${BASE}/certs"
+  mv -T -- "${CERT_STAGE}/certs" "${BASE}/certs"
+  rmdir -- "${CERT_STAGE}"
 fi
 [[ ! -f ${WORK_DIR}/root/hy2panel-credentials ]] || install -o root -g root -m 600 "${WORK_DIR}/root/hy2panel-credentials" /root/hy2panel-credentials
 [[ ! -f ${WORK_DIR}/var/lib/hy2panel/traffic.json ]] || install -D -o hy2panel -g hy2panel -m 600 "${WORK_DIR}/var/lib/hy2panel/traffic.json" /var/lib/hy2panel/traffic.json

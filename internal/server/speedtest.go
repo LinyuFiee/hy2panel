@@ -74,6 +74,9 @@ func (t *SpeedTester) Start() bool {
 			t.lastError = err.Error()
 			return
 		}
+		if result.Timestamp.IsZero() {
+			result.Timestamp = time.Now().UTC()
+		}
 		t.result = &result
 		t.lastError = ""
 	}()

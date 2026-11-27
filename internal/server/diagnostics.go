@@ -84,15 +84,11 @@ func runDiagnostics(ctx context.Context, cfg *config.Config) DiagnosticsResponse
 		} else {
 			add(DiagnosticCheck{ID: "hy2-listen", Name: "Hysteria2 监听", Status: "pass", Message: fmt.Sprintf("UDP %d 正在监听", cfg.Hysteria2.Port)})
 		}
-		if err := checkCertificate(cfg.Hysteria2.CertFile, time.Now()); err != nil {
-			add(DiagnosticCheck{ID: "certificate", Name: "节点证书", Status: "warn", Message: err.Error(), Suggestion: "检查 certbot.timer 和 TCP 80 的续期条件。"})
-		} else {
-			add(DiagnosticCheck{ID: "certificate", Name: "节点证书", Status: "pass", Message: "Hysteria2 证书有效"})
-		}
+		add(checkHY2Certificate(cfg.Hysteria2.CertFile, cfg.Hysteria2.Domain, time.Now()))
 		if err := checkDNS(ctx, cfg.Hysteria2.Domain); err != nil {
 			add(DiagnosticCheck{ID: "dns", Name: "域名解析", Status: "warn", Message: err.Error(), Suggestion: "检查域名 A/AAAA 记录和本机 DNS。"})
 		} else {
-			add(DiagnosticCheck{ID: "dns", Name: "域名解析", Status: "pass", Message: "Hysteria2 域名解析正常"})
+			add(DiagnosticCheck{ID: "dns", Name: "域名解析", Status: "pass", Message: "服务器能解析 HY2 域名；请在客户端核对解析地址"})
 		}
 	}
 	if cfg.Reality.Enabled {
@@ -171,30 +167,40 @@ func listenerPorts(output []byte) map[int]bool {
 	return ports
 }
 
-func checkCertificate(path string, now time.Time) error {
+func checkHY2Certificate(path, domain string, now time.Time) DiagnosticCheck {
+	check := DiagnosticCheck{ID: "certificate", Name: "节点证书", Status: "fail", Suggestion: "检查证书部署、文件权限和 certbot.timer 续期状态。"}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("无法读取证书: %w", err)
+		check.Message = fmt.Sprintf("无法读取证书: %v", err)
+		return check
 	}
 	block, _ := pem.Decode(data)
-	if block == nil {
-		return fmt.Errorf("证书 PEM 格式无效")
+	if block == nil || block.Type != "CERTIFICATE" {
+		check.Message = "节点证书不是有效的 PEM 证书"
+		return check
 	}
-	certificate, err := x509.ParseCertificate(block.Bytes)
+	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return fmt.Errorf("证书解析失败: %w", err)
+		check.Message = "无法解析节点证书"
+		return check
 	}
-	if now.Before(certificate.NotBefore) {
-		return fmt.Errorf("证书尚未生效")
+	switch {
+	case now.Before(cert.NotBefore):
+		check.Message = "节点证书尚未生效"
+	case !now.Before(cert.NotAfter):
+		check.Message = fmt.Sprintf("节点证书已于 %s 过期", cert.NotAfter.Format("2006-01-02"))
+	case cert.VerifyHostname(domain) != nil:
+		check.Message = fmt.Sprintf("节点证书与域名 %s 不匹配", domain)
+		check.Suggestion = "核对 HY2 节点域名，部署包含该域名的证书，不要关闭客户端证书校验。"
+	case cert.NotAfter.Sub(now) < 14*24*time.Hour:
+		check.Status = "warn"
+		check.Message = fmt.Sprintf("域名匹配，证书将于 %s 到期", cert.NotAfter.Format("2006-01-02"))
+	default:
+		check.Status = "pass"
+		check.Message = "节点证书在有效期内，且与 HY2 域名匹配"
+		check.Suggestion = ""
 	}
-	if now.After(certificate.NotAfter) {
-		return fmt.Errorf("证书已于 %s 过期", certificate.NotAfter.Format("2006-01-02"))
-	}
-	days := int(certificate.NotAfter.Sub(now).Hours() / 24)
-	if days < 14 {
-		return fmt.Errorf("证书将在 %d 天后到期", days)
-	}
-	return nil
+	return check
 }
 
 func checkDNS(ctx context.Context, domain string) error {

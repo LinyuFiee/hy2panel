@@ -25,7 +25,9 @@ async function resetMock(page) {
 async function openConsole(page, section = 'overview') {
   await resetMock(page)
   await page.goto(`/#/${section}`)
-  await expect(page.getByRole('heading', { name: section === 'overview' ? '运行概览' : section === 'traffic' ? '流量监控' : section === 'nodes' ? '节点管理' : section === 'maintenance' ? '维护与诊断' : '系统设置' })).toBeVisible()
+  const titles = { overview: '运行概览', traffic: '流量监控', nodes: '节点管理', maintenance: '维护与诊断', settings: '系统设置' }
+  await expect(page.getByRole('banner').getByRole('heading', { level: 1, name: titles[section], exact: true })).toBeVisible()
+  await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toHaveCount(0)
 }
 
 async function openLogin(page) {
@@ -53,57 +55,6 @@ async function expectNoSeriousA11yViolations(page, { disable = [] } = {}) {
   expect(results.violations.filter(item => ['critical', 'serious'].includes(item.impact))).toEqual([])
 }
 
-async function installFigureLifecycleProbe(page, { reducedMotion = false } = {}) {
-  await page.addInitScript(({ reduce }) => {
-    const nativeMatchMedia = window.matchMedia.bind(window)
-    window.matchMedia = query => {
-      const result = nativeMatchMedia(query)
-      if (query !== '(prefers-reduced-motion: reduce)') return result
-      return {
-        matches: reduce,
-        media: query,
-        onchange: null,
-        addEventListener: result.addEventListener.bind(result),
-        removeEventListener: result.removeEventListener.bind(result),
-        addListener: result.addListener?.bind(result),
-        removeListener: result.removeListener?.bind(result),
-        dispatchEvent: result.dispatchEvent.bind(result)
-      }
-    }
-    window.__figureLifecycle = { requests: 0, cancels: 0, active: new Set() }
-    const nativeRequest = window.requestAnimationFrame.bind(window)
-    const nativeCancel = window.cancelAnimationFrame.bind(window)
-    window.requestAnimationFrame = callback => {
-      window.__figureLifecycle.requests += 1
-      let id = 0
-      id = nativeRequest(time => {
-        window.__figureLifecycle.active.delete(id)
-        callback(time)
-      })
-      window.__figureLifecycle.active.add(id)
-      return id
-    }
-    window.cancelAnimationFrame = id => {
-      window.__figureLifecycle.cancels += 1
-      window.__figureLifecycle.active.delete(id)
-      return nativeCancel(id)
-    }
-    window.__figureIntersections = new Map()
-    window.IntersectionObserver = class {
-      constructor(callback) { this.callback = callback; this.targets = new Set() }
-      observe(target) { this.targets.add(target); window.__figureIntersections.set(target, this); queueMicrotask(() => this.targets.has(target) && this.callback([{ target, isIntersecting: true, intersectionRatio: 1 }], this)) }
-      unobserve(target) { this.targets.delete(target); window.__figureIntersections.delete(target) }
-      disconnect() { for (const target of this.targets) window.__figureIntersections.delete(target); this.targets.clear() }
-    }
-    window.__setFigureIntersection = (target, visible) => {
-      const observer = window.__figureIntersections.get(target)
-      if (!observer) return false
-      observer.callback([{ target, isIntersecting: visible, intersectionRatio: visible ? 1 : 0 }], observer)
-      return true
-    }
-  }, { reduce: reducedMotion })
-}
-
 test('login uses the direct Hairline padlock and submits credentials', async ({ page }, testInfo) => {
   await openLogin(page)
   const figure = page.locator('[data-hairline="padlock"]')
@@ -112,60 +63,126 @@ test('login uses the direct Hairline padlock and submits credentials', async ({ 
   await expect(figure).toHaveAttribute('aria-label', /交互式安全插图/)
   await expect(figure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
   await expect(page.getByLabel('管理员密码')).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true })
   await page.getByLabel('管理员密码').fill('mock-password')
   await page.getByRole('button', { name: '登录' }).click()
   await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
   await expectNoSeriousA11yViolations(page)
-  await page.screenshot({ path: testInfo.outputPath('login.png'), fullPage: true })
 })
 
-test('overview shell, grouped cards and theme render without runtime errors', async ({ page }, testInfo) => {
+test('connection overview keeps HY2 checks separate from device connectivity', async ({ page }, testInfo) => {
   await openConsole(page)
-  await expect(page.getByRole('navigation', { name: '控制台分区' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
-  const relayFigure = page.locator('[data-hairline="relay"]')
-  await expect(relayFigure).toBeVisible()
-  await expect(relayFigure).toHaveAttribute('role', 'img')
-  await expect(relayFigure).toHaveAttribute('aria-label', /不是实时遥测/)
-  await expect(relayFigure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
-  const figure = page.locator('[data-figure="node-flow"]')
-  await expect(figure).toBeVisible()
-  await expect(figure).toHaveAttribute('data-animation-state', 'playing')
-  await expect(figure).toHaveAttribute('role', 'img')
-  await expect(figure.locator('svg')).toHaveAttribute('aria-hidden', 'true')
-  await expect(page.getByText('节点协议', { exact: true })).toBeVisible()
-  await expect(page.getByText('套餐流量', { exact: true })).toBeVisible()
-  await expect(page.getByText('系统', { exact: true })).toBeVisible()
-  await expect(page.getByText(/小路由器|router|antenna|机架|服务器刀片/i)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '创建并复制订阅' })).toBeEnabled()
+  await expect(page.getByRole('heading', { name: 'HY2 服务端检查' })).toHaveCount(0)
+  await expect(page.locator('[data-hairline], [data-figure="node-flow"]')).toHaveCount(0)
   await page.getByRole('button', { name: '深色' }).click()
-  await expect(page.locator('html')).toHaveClass(/dark/)
   await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#0b0b0c')
   await expectNoSeriousA11yViolations(page)
   await page.screenshot({ path: testInfo.outputPath('overview.png'), fullPage: true })
+  await page.getByRole('button', { name: '诊断 HY2' }).click()
+  await expect(page.getByRole('heading', { name: 'HY2 服务端检查' })).toBeVisible()
+  await expect(page.getByText('UDP 443 正在监听')).toBeVisible()
+  await expect(page.getByText('模拟提醒：请核对解析记录')).toBeVisible()
+  await expect(page.getByText(/设备连接未测试/).first()).toBeVisible()
 })
 
-test('overview node-flow figure respects reduced motion and pointer progress', async ({ page }) => {
-  await installFigureLifecycleProbe(page, { reducedMotion: true })
-  await resetMock(page)
-  await page.goto('/#/overview')
-  await expect(page.getByRole('heading', { name: '运行概览' })).toBeVisible()
-  const figure = page.locator('[data-figure="node-flow"]')
-  await expect(figure).toBeVisible()
-  await expect(figure).toHaveAttribute('data-animation-state', 'reduced-motion')
-  const restingProgress = await figure.getAttribute('data-progress')
-  await page.waitForTimeout(150)
-  await expect(figure).toHaveAttribute('data-progress', restingProgress)
-  const lifecycle = await page.evaluate(() => ({
-    requests: window.__figureLifecycle.requests,
-    active: window.__figureLifecycle.active.size
-  }))
-  expect(lifecycle.requests).toBeLessThanOrEqual(1)
-  expect(lifecycle.active).toBe(0)
-  await figure.scrollIntoViewIfNeeded()
-  const box = await figure.boundingBox()
-  await page.mouse.move(box.x + box.width * 0.82, box.y + box.height * 0.75)
-  await expect.poll(async () => Number(await figure.getAttribute('data-progress'))).toBeGreaterThan(0.65)
+test('packet illustration moves, pauses, and respects reduced motion and disabled protocols', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  await page.route('**/api/state', async route => {
+    const response = await route.fetch()
+    const state = await response.json()
+    state.config.hysteria2.enabled = false
+    await route.fulfill({ response, json: state })
+  })
+  await openConsole(page)
+  const flow = page.getByRole('listitem').filter({ hasText: 'Reality' }).locator('.packet-flow')
+  const outbound = flow.locator('.outgoing')
+  const offset = () => outbound.evaluate(path => getComputedStyle(path).strokeDashoffset)
+  await expect(flow.locator('.packet')).toHaveCount(2)
+  await expect(page.getByRole('listitem').filter({ hasText: 'Hysteria2' }).locator('.packet')).toHaveCount(0)
+  await expect(outbound).toHaveCSS('animation-play-state', 'running')
+  const start = await offset()
+  await expect.poll(offset).not.toBe(start)
+  const firstFrame = await flow.screenshot()
+  await expect.poll(async () => firstFrame.equals(await flow.screenshot())).toBe(false)
+  await page.getByRole('button', { name: '暂停传输示意' }).click()
+  await expect(outbound).toHaveCSS('animation-play-state', 'paused')
+  const pausedFrame = await flow.screenshot()
+  expect(pausedFrame.equals(await flow.screenshot())).toBe(true)
+  await page.getByRole('button', { name: '播放传输示意' }).press('Enter')
+  await expect(outbound).toHaveCSS('animation-play-state', 'running')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect(outbound).toHaveCSS('animation-name', 'none')
+  const reducedFrame = await flow.screenshot()
+  expect(reducedFrame.equals(await flow.screenshot())).toBe(true)
+  await expect(page.getByRole('button', { name: '暂停传输示意' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '创建并复制订阅' })).toBeEnabled()
 })
+
+test('subscription is opt-in, repeatable, rotatable and revocable', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: async value => { window.__copiedSubscription = value } }
+  }))
+  await openConsole(page)
+  const create = page.getByRole('button', { name: '创建并复制订阅' })
+  const copy = page.getByRole('button', { name: '复制订阅', exact: true })
+  await create.click()
+  await expect.poll(() => page.evaluate(() => window.__copiedSubscription)).toContain('/api/sub/')
+  const first = await page.evaluate(() => window.__copiedSubscription)
+  await page.reload()
+  await copy.click()
+  await expect.poll(() => page.evaluate(() => window.__copiedSubscription)).toBe(first)
+  await page.getByText('订阅管理', { exact: true }).click()
+  await page.getByRole('button', { name: '重置订阅', exact: true }).click()
+  await page.getByRole('button', { name: '确认重置' }).click()
+  await copy.click()
+  await expect.poll(() => page.evaluate(() => window.__copiedSubscription)).not.toBe(first)
+  await page.getByRole('button', { name: '撤销订阅', exact: true }).click()
+  await page.getByRole('button', { name: '确认撤销' }).click()
+  await expect(create).toBeEnabled()
+  await expect(page.getByText(first, { exact: true })).toHaveCount(0)
+})
+
+test('manual subscription copy is only visible while its dialog is open', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: async () => { throw new Error('clipboard unavailable') } }
+  }))
+  await openConsole(page)
+  await page.getByRole('button', { name: '创建并复制订阅' }).click()
+  const dialog = page.getByRole('dialog', { name: '手动复制订阅' })
+  await expect(dialog.getByRole('textbox', { name: '订阅地址' })).toHaveValue(/^https:\/\/panel\.example\.com:8443\/api\/sub\//)
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(page.getByRole('textbox', { name: '订阅地址' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '复制订阅', exact: true })).toBeEnabled()
+})
+
+test('a changed node cannot keep a previous diagnostic report', async ({ page }) => {
+  await openConsole(page)
+  await page.getByRole('button', { name: '诊断 HY2' }).click()
+  await expect(page.getByRole('heading', { name: 'HY2 服务端检查' })).toBeVisible()
+  await page.request.post('/api/config', { data: { hysteria2: { port: 24443 } } })
+  await expect(page.getByText('节点配置已更改，请重新诊断。')).toBeVisible({ timeout: 8000 })
+  await expect(page.getByRole('heading', { name: 'HY2 服务端检查' })).toHaveCount(0)
+  await page.getByRole('button', { name: '诊断 HY2' }).click()
+  await expect(page.getByText('UDP 24443 正在监听')).toBeVisible()
+})
+
+for (const width of [320, 390, 768, 1024, 1440]) {
+  test(`overview actions fit at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 })
+    await openConsole(page)
+    const subscribe = page.getByRole('button', { name: '创建并复制订阅' })
+    await expect(subscribe).toBeInViewport()
+    await expect(page.getByRole('button', { name: '诊断 HY2' })).toBeInViewport()
+    const protocols = await page.getByRole('list', { name: '节点协议' }).boundingBox()
+    const resources = await page.getByRole('region', { name: '主机资源' }).boundingBox()
+    expect((await subscribe.boundingBox()).y).toBeLessThan(protocols.y)
+    if (width > 1080) expect(resources.x).toBeGreaterThanOrEqual(protocols.x + protocols.width)
+    else expect(resources.y).toBeGreaterThanOrEqual(protocols.y + protocols.height)
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath('overview.png') })
+  })
+}
 
 test('nodes use progressive settings and on-demand credential dialogs', async ({ page }, testInfo) => {
   await openConsole(page, 'nodes')
@@ -199,6 +216,24 @@ test('traffic workspace keeps protocol gaps and speedtest states', async ({ page
   await expect(page.getByText('正在测量服务器链路')).toBeVisible()
   await expect(page.getByRole('button', { name: '开始测速' })).toBeEnabled({ timeout: 10000 })
   await page.screenshot({ path: testInfo.outputPath('traffic.png'), fullPage: true })
+})
+
+test('failed VPS test retains the last successful result', async ({ page }) => {
+  const speedtest = {
+    running: false, error: '测试站暂不可用',
+    result: { timestamp: '2026-11-07T10:00:00Z', server_name: 'Previous test station', download_mbps: 123, upload_mbps: 45 }
+  }
+  for (const endpoint of ['**/api/state', '**/api/system/status']) {
+    await page.route(endpoint, async route => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...await response.json(), speedtest } })
+    })
+  }
+  await openConsole(page, 'traffic')
+  const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name: 'VPS 到测速站' }) })
+  await expect(card.getByText('最近一次失败')).toBeVisible()
+  await expect(card.getByText(/上次成功：.*Previous test station/)).toBeVisible()
+  await expect(card.getByText('测试站暂不可用')).toBeVisible()
 })
 
 test('maintenance exposes manual tabs, diagnostics and recovery policy', async ({ page }, testInfo) => {

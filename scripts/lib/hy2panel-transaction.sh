@@ -4,16 +4,50 @@ HY2PANEL_BASE="${HY2PANEL_BASE:-/etc/hy2panel}"
 HY2PANEL_MAINTENANCE_LOCK="${HY2PANEL_MAINTENANCE_LOCK:-/run/lock/hy2panel-maintenance.lock}"
 HY2PANEL_RUNTIME_LOCK="${HY2PANEL_RUNTIME_LOCK:-/run/lock/hy2panel-runtime.lock}"
 
+# Only the installed config directory may receive panel write access. Its
+# entry in /etc cannot be replaced by the panel; never follow a symlink here.
+hy2panel_prepare_config_dir() {
+  local dir=/etc/hy2panel
+  if [[ -e ${dir} || -L ${dir} ]]; then
+    if [[ ! -L ${dir} && -d ${dir} ]]; then
+      case $(stat -c '%u:%G:%a' -- "${dir}") in
+        0:hy2panel:1770) return 0 ;;
+        0:root:755) install -d -o root -g hy2panel -m 1770 "${dir}"; return ;; # v0.8 updater
+      esac
+    fi
+    printf 'Unsafe config directory: %s\n' "${dir}" >&2
+    return 1
+  fi
+  install -d -o root -g hy2panel -m 1770 "${dir}"
+}
+
+# cp -a already preserves snapshot ownership and modes. For panel-writable
+# parents, stage privately and rename, never chmod/chown the live pathname.
+hy2panel_restore_snapshot_entry() {
+  local source=$1 target=$2 parent staging status=0
+  parent="$(dirname -- "${target}")" || return 1
+  if [[ ${parent} == /etc/hy2panel ]]; then
+    staging="$(mktemp -d /etc/hy2panel/.rollback.XXXXXX)" || return 1
+    if ! cp -aT -- "${source}" "${staging}/entry" || ! mv -fT -- "${staging}/entry" "${target}"; then
+      status=1
+    fi
+    rm -rf -- "${staging}" || return 1
+    return "${status}"
+  fi
+  [[ -d ${parent} ]] || install -d -o root -g root -m 755 "${parent}" || return 1
+  rm -rf -- "${target}" && cp -aT -- "${source}" "${target}"
+}
+
 hy2panel_atomic_text() {
   local path=$1 owner=$2 group=$3 mode=$4 value=$5
   local directory temporary
   directory="$(dirname -- "${path}")"
   temporary="$(mktemp "${directory}/.$(basename -- "${path}").XXXXXX")"
   printf '%s\n' "${value}" > "${temporary}"
-  chown "${owner}:${group}" "${temporary}"
   chmod "${mode}" "${temporary}"
-  sync -f "${temporary}" 2>/dev/null || sync "${temporary}" 2>/dev/null || true
-  mv -f "${temporary}" "${path}"
+  chown "${owner}:${group}" "${temporary}"
+  sync -f "${directory}" 2>/dev/null || true
+  mv -fT -- "${temporary}" "${path}"
   sync -f "${directory}" 2>/dev/null || true
 }
 
@@ -23,10 +57,10 @@ hy2panel_atomic_copy() {
   directory="$(dirname -- "${target}")"
   temporary="$(mktemp "${directory}/.$(basename -- "${target}").XXXXXX")"
   cp -- "${source}" "${temporary}"
-  chown "${owner}:${group}" "${temporary}"
   chmod "${mode}" "${temporary}"
-  sync -f "${temporary}" 2>/dev/null || sync "${temporary}" 2>/dev/null || true
-  mv -f "${temporary}" "${target}"
+  chown "${owner}:${group}" "${temporary}"
+  sync -f "${directory}" 2>/dev/null || true
+  mv -fT -- "${temporary}" "${target}"
   sync -f "${directory}" 2>/dev/null || true
 }
 

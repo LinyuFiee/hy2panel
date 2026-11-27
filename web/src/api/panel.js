@@ -6,6 +6,10 @@ export function createPanelApi(client) {
     login: password => post('/api/login', { password }),
     logout: () => post('/api/logout'),
     state: () => get('/api/state'),
+    subscriptionStatus: signal => client.request('/api/subscription', { signal, cache: 'no-store' }),
+    manageSubscription: (action, signal) => client.request('/api/subscription', {
+      method: 'POST', json: { action }, signal, cache: 'no-store'
+    }),
     systemStatus: () => get('/api/system/status'),
     trafficLive: () => get('/api/traffic/live'),
     trafficHistory: range => get(`/api/traffic/history?range=${encodeURIComponent(range)}`),
@@ -21,7 +25,7 @@ export function createPanelApi(client) {
     clearRackNerd: () => post('/api/settings/racknerd', { api_key: '', api_hash: '', clear: true }),
     updateRecovery: autoPort => post('/api/settings/recovery', { auto_port: autoPort }),
     logs: (unit, lines = 150) => get(`/api/logs?unit=${encodeURIComponent(unit)}&lines=${encodeURIComponent(lines)}`),
-    diagnostics: () => post('/api/diagnostics'),
+    diagnostics: signal => client.request('/api/diagnostics', { method: 'POST', json: {}, signal }),
     checkUpdates: () => post('/api/update/check'),
     applyUpdate: () => post('/api/update/apply'),
     applyBBR: () => post('/api/bbr'),
