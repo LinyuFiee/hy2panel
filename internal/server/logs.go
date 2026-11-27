@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -37,22 +38,22 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 		}
 		lines = parsed
 	}
+	cfg, err := s.store.Load()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "无法读取配置以隐藏日志凭据")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
 	defer cancel()
 	output, err := exec.CommandContext(ctx, "journalctl", "-q", "-u", service, "-n", strconv.Itoa(lines), "--no-pager", "-o", "short-iso").CombinedOutput()
+	trimmed := strings.TrimSpace(redactSecrets(string(output), cfg))
 	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
+		if trimmed == "" {
+			trimmed = err.Error()
 		}
-		writeError(w, http.StatusBadGateway, "读取日志失败: "+message)
+		writeError(w, http.StatusBadGateway, "读取日志失败: "+trimmed)
 		return
 	}
-	cfg, loadErr := s.store.Load()
-	if loadErr == nil {
-		output = []byte(redactSecrets(string(output), cfg))
-	}
-	trimmed := strings.TrimSpace(string(output))
 	entries := []string{}
 	if trimmed != "" {
 		entries = strings.Split(trimmed, "\n")
@@ -60,7 +61,11 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"unit": unit, "entries": entries})
 }
 
+// Match the path, not the stored token: rotated and revoked URLs are secrets too.
+var subscriptionLogPath = regexp.MustCompile(`/api/sub/[^/\s?#"'<>]+`)
+
 func redactSecrets(value string, cfg *config.Config) string {
+	value = subscriptionLogPath.ReplaceAllString(value, subscriptionPrefix+"[已隐藏]")
 	secrets := []string{
 		cfg.AdminPasswordHash,
 		cfg.RackNerd.APIKey,

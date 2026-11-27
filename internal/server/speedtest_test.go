@@ -57,7 +57,7 @@ func TestSpeedTesterPreventsConcurrentRuns(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	state := tester.State()
-	if state.Running || state.Result == nil || state.Result.ServerName != "done" {
+	if state.Running || state.Result == nil || state.Result.ServerName != "done" || state.Result.Timestamp.IsZero() {
 		t.Fatalf("unexpected final state: %#v", state)
 	}
 }

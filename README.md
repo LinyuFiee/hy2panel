@@ -1,8 +1,8 @@
 # hy2panel
 
-面向个人、单台 VPS、单节点的轻量管理面板。Go + Vue 编写，管理 VLESS Reality 与 Hysteria2，并集中展示协议流量、系统状态、RackNerd 套餐流量、BBR 与 LibreSpeed 测速。
+单台 VPS 的 Reality / Hysteria2 管理面板，支持 sing-box 订阅、流量监控和连接诊断。
 
-它不是多用户、集群或商业计费平台，也不替代主机防火墙、外部监控和备份系统。
+[安装](#安装) · [客户端连接](#在-sing-box-客户端连接) · [升级](#升级) · [下载稳定版](https://github.com/LinyuFiee/hy2panel/releases/latest)
 
 ![hy2panel 概览](docs/images/dashboard.png)
 
@@ -16,19 +16,9 @@
 
 ## 功能
 
-- 五区控制台（概览 / 节点 / 流量 / 维护 / 设置），亮色、暗色、跟随系统三种主题与移动端底部导航
-- VLESS Reality Vision 与 Hysteria2 配置、按需显示的客户端链接和本地二维码
-- Reality / Hysteria2 实时速率、累计有效载荷、活动代理流与最多 7 天分钟趋势
-- 无法安全归类的代理流量单列为「未归属」
-- 主机上下行、CPU、内存、磁盘和运行时间
-- RackNerd 官方 API 月度套餐流量，成功结果缓存 5 分钟
-- BBR + fq 固定模板与 LibreSpeed 按需测速
-- 配置预检、原子应用、服务健康检查和失败回滚
-- sing-box 版本 allowlist、资产 size/SHA-256 校验、切换与上一版本回滚
-- 面板精确目标版本升级、维护互斥、升级快照和失败回滚
-- `hy2` 管理命令、配置备份/恢复和保守卸载
-- HTTPS、强密码策略、按直接来源 IP 登录限流、HttpOnly/SameSite Strict 会话
-- 面板与 sing-box 非 root 运行；固定系统操作由受控 root 单元完成
+- **接入**：用一个可撤销的 sing-box 订阅管理两个协议，也可单独扫码导入。
+- **观测**：查看协议流量、主机资源和 RackNerd 套餐用量，区分服务端自检与设备实测。
+- **维护**：用面板或 `hy2` 切换核心、查看日志、备份配置和升级。
 
 ## 环境要求
 
@@ -86,11 +76,23 @@ export SING_BOX_VERSION="1.14.4"
 
 未指定时安装清单中唯一标为 `recommended` 的版本。allowlist 同时固定官方资产名称、字节数和 SHA-256。
 
+## 在 sing-box 客户端连接
+
+1. 在面板概览点击「创建并复制订阅」。在 sing-box 官方客户端新建**远程配置**，粘贴 HTTPS 地址，下载后选中这份配置再启动。这里返回原生 sing-box JSON，不需要订阅转换网站。原有单节点链接和二维码仍在「节点」页。
+2. 两个协议都启用时，客户端可自动选择，也可单独选择 Reality 或 Hysteria2。只启用一个协议时只导入该协议。保存节点参数后，**在客户端刷新原订阅**即可获取新配置；面板不会远程修改设备上正在使用的配置。
+3. HY2 连不上时，先在概览运行「诊断 HY2」。检查失败项：UDP 是否监听、节点证书是否覆盖客户端使用的域名、服务器能否解析域名。即便检查全部通过，也需要在客户端**手选 Hysteria2** 测试；自动选择可能正在走 Reality。初次下载订阅只访问面板 HTTPS，不代表节点握手成功。
+
+**比较稳定性和速度：**在同一台设备、同一网络下先手选 HY2，再手选 Reality，对同一测试地址重复几次。URLTest 的毫秒数表示经该协议访问测试地址的耗时，不是带宽；测吞吐时用同一测速站，并确认测速流量经过所选节点。换 Wi-Fi 或蜂窝网络后分开记录。面板不收集设备端测试结果；「流量」里的 LibreSpeed 只测 VPS 到测速站，不能替代上述测试。
+
+本配置面向使用 **sing-box 1.14.x 核心**的官方客户端。自动组默认通过各节点访问 `https://www.gstatic.com/generate_204` 测延迟，应用 DNS 通过当前代理访问 Cloudflare DoH；节点域名本身走设备的系统 DNS。测试地址或 DNS 服务不可达也会影响结果，不等于节点一定故障。
+
+**订阅地址就是凭据。**只在受信任的设备上导入，不要发到群聊、在线转换器或日志。若使用反向代理，请勿记录 `/api/sub/` 后的路径。重置地址会立即停用旧 URL，需要在设备上重新导入；撤销只阻止以后的下载，已经下载的节点凭据需另行更换。订阅密钥独立保存在服务私有目录，不进 `hy2 backup`，恢复备份后需重新创建订阅。
+
 ## Hysteria2 调优
 
 「节点 → 高级认证与带宽」提供四项设置：
 
-- **不限速**：不向 sing-box 声明带宽，由客户端拥塞控制自行探测。链路远高于默认的 100 Mbps 时开启可解除上限。
+- **不限速**：省略服务端带宽声明，不代表一定能跑满带宽。实际拥塞控制也取决于客户端设置。
 - **上传 / 下载 Mbps**：仅作为拥塞控制的目标提示，不是限速开关。填略高于实测链路的数值，填过大会加剧拥塞。
 - **BBR 拥塞档位**：`conservative` / `standard`（默认）/ `aggressive`。高丢包链路可尝试 `aggressive`。
 - **QUIC 混淆**：`salamander` / `gecko`。把 QUIC 流量伪装成随机 UDP，可缓解运营商对 UDP 的限速。开启后客户端必须填写相同的混淆密码，旧客户端会立即断连。
@@ -147,11 +149,17 @@ hy2 update
 
 ## 升级
 
-面板 UI 的「系统设置 → 面板更新」先从 GitHub 最新稳定 Release 取得精确目标版本，再提交含该版本的升级请求。服务器只下载 `v目标版本` 的固定 bundle 与 `.sha256`，并验证包内二进制报告的版本完全一致。
+**从官方 v0.8.0 更新到 v0.9.0：**先运行 `hy2 backup`，确认有可恢复的备份并预留维护窗口。请使用 [v0.9.0 发布页](https://github.com/LinyuFiee/hy2panel/releases/tag/v0.9.0) 的一次性工具 `upgrade-from-v080.sh`，核对下载文件的 SHA-256 后再运行 `sudo bash ./upgrade-from-v080.sh --apply`。它使用新版升级器完成本次升级及必要的回滚；不要用旧面板的更新按钮替代，也不需要重新安装。修改过受管升级脚本或使用非官方二进制的机器不适用。
+
+可在有 GitHub CLI 的可信电脑上校验脚本的构建来源，再将同一文件传到 VPS：
 
 ```bash
-hy2 update    # 交互输入目标版本，例如 0.8.0
+gh attestation verify ./upgrade-from-v080.sh -R LinyuFiee/hy2panel \
+  --signer-workflow LinyuFiee/hy2panel/.github/workflows/release.yml \
+  --source-ref refs/tags/v0.9.0
 ```
+
+后续常规升级可以在「系统设置 → 面板更新」检测并确认目标版本，也可以运行 `hy2 update` 并输入完整版本号。服务器会核验目标安装包的 SHA-256 和包内二进制版本。
 
 升级流程：预检下载和校验 → 记录受管文件/单元快照 → 安装新文件 → 配置迁移与渲染 → 重启核心和面板 → 健康检查 → 提交。配置、二进制、脚本和 systemd 单元在同一维护锁内处理，失败时尝试恢复快照。`/etc/hy2panel/panel.json` 不会被新包覆盖，域名、UUID、密钥、密码与 RackNerd 凭据会保留。
 
@@ -249,7 +257,7 @@ systemd-analyze verify systemd/*.path systemd/*.service systemd/*.timer
 
 ## 发布
 
-发布标签使用 `v0.8.x`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
+发布标签使用 `v0.x.y`。Release workflow 复用 CI，校验标签、`internal/version.Version`、`web/package.json` 和 lockfile 完全一致，以 ldflags 注入标签版本，生成：
 
 ```text
 hy2panel-bundle-linux-amd64.tar.gz
@@ -261,7 +269,7 @@ bundle 包含 Linux 二进制、全部安装/维护脚本、事务库、sing-box
 ## 第三方项目
 
 - [sing-box](https://github.com/SagerNet/sing-box)：GPL-3.0-or-later（另有上游名称/关联声明限制）；安装器按 allowlist 下载官方二进制，不重打包进 hy2panel bundle
-- [Hairline](https://github.com/lucasmarkes/hairline)：MIT，登录、链路与空状态中的互动线稿；协议路径图为 hy2panel 自有实现
+- [Hairline](https://github.com/lucasmarkes/hairline)：MIT，登录和流量空状态中的线稿
 - [LibreSpeed CLI](https://github.com/librespeed/speedtest-cli)：LGPL-3.0，按需服务器测速
 - [Lucide](https://github.com/lucide-icons/lucide)：ISC，界面图标
 

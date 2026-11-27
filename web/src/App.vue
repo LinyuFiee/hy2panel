@@ -23,7 +23,7 @@ import { createApiClient, isCanceledRequest } from './api/client'
 import { createPanelApi } from './api/panel'
 import { useClipboardFeedback } from './composables/useClipboard'
 import { useMaintenanceLock } from './composables/useMaintenanceLock'
-import { useNodeDraft } from './composables/useNodeDraft'
+import { nodeConfigFingerprint, useNodeDraft } from './composables/useNodeDraft'
 import { usePolling } from './composables/usePolling'
 import { useSessionReset } from './composables/useSessionReset'
 import { useTrafficHistory } from './composables/useTrafficHistory'
@@ -39,20 +39,15 @@ const settingsRef = ref(null)
 const singBoxVersions = ref(null)
 const singBoxLoading = ref(false)
 const diagnosticReport = ref(null)
+const reportInvalidated = ref(false)
+let diagnosticRequest = null
 const logEntries = ref([])
 const logUnit = ref('sing-box')
 const busy = reactive({ nodes: false, racknerd: false, bbr: false, speedtest: false, diagnostics: false, logs: false, recovery: false, updateCheck: false, updating: false, singBox: false })
 
 const currentNavItem = computed(() => findNavItem(activeTab.value))
-const panelAddress = computed(() => {
-  const domain = state.value?.config?.panel?.domain
-  if (domain) return `https://${domain}:8443`
-  if (typeof window !== 'undefined') return window.location.origin
-  return ''
-})
 const serviceHealthy = computed(() => state.value?.status?.sing_box === 'active')
-const overviewStatus = computed(() => state.value?.status || {})
-const overviewRackNerd = computed(() => state.value?.racknerd || { configured: false })
+const isOverview = computed(() => activeTab.value === 'overview')
 const maintenanceLabel = computed(() => maintenanceBusy.value ? '维护任务运行中' : '无维护任务')
 const routeAnnouncement = computed(() => `当前页面：${currentNavItem.value.title}`)
 
@@ -96,7 +91,7 @@ function clearBusy() {
 function resetSensitiveState() {
   state.value = null
   singBoxVersions.value = null
-  diagnosticReport.value = null
+  invalidateDiagnostics(false)
   logEntries.value = []
   logUnit.value = 'sing-box'
   password.value = ''
@@ -161,6 +156,9 @@ function handleUnauthorized() {
 
 function applyState(payload, { syncDraft = false } = {}) {
   const previousStatus = state.value?.status
+  if ((diagnosticRequest || diagnosticReport.value) && nodeConfigFingerprint(state.value?.config) !== nodeConfigFingerprint(payload.config)) {
+    invalidateDiagnostics(true)
+  }
   state.value = payload
   if (syncDraft) nodeDraft.accept(payload.config)
   else nodeDraft.reconcile(payload.config)
@@ -217,6 +215,7 @@ async function loadSingBoxVersions(showError = false) {
 }
 
 async function initializeAuthenticatedSession() {
+  activeTab.value = sectionFromHash(window.location.hash)
   const authenticated = await refresh(true, true)
   if (!authenticated || view.value !== 'app') return false
   syncSectionFromHash({ replaceInvalid: true })
@@ -241,8 +240,7 @@ async function login() {
     authStopped = false
     password.value = ''
     activeTab.value = sectionFromHash(window.location.hash)
-    const authenticated = await initializeAuthenticatedSession()
-    if (authenticated) toast.success('已进入控制平面')
+    await initializeAuthenticatedSession()
   } catch (failure) {
     if (!isCanceledRequest(failure)) error.value = failure.message
   } finally {
@@ -251,13 +249,13 @@ async function login() {
 }
 
 async function logout() {
-  polling.stop()
-  apiClient.abortInFlight('logout')
+  if (authStopped) return
+  view.value = 'leaving'
+  resetSession('logout')
   try {
     await api.logout()
   } catch {
   } finally {
-    resetSession('logout')
     error.value = ''
     notice.value = ''
     activeTab.value = DEFAULT_SECTION
@@ -281,11 +279,15 @@ function switchTab(tab, { updateHash = true } = {}) {
   if (section === 'settings') loadSingBoxVersions()
 }
 
-function showNotice(message) {
+function showNotice(message, copyKey = '') {
+  if (copyKey) copied.value = copyKey
   notice.value = message
   toast.success(message)
   window.clearTimeout(noticeTimer)
-  noticeTimer = window.setTimeout(() => { notice.value = '' }, 4000)
+  noticeTimer = window.setTimeout(() => {
+    notice.value = ''
+    if (copyKey && copied.value === copyKey) clipboard.reset()
+  }, 4000)
 }
 
 async function saveNodes() {
@@ -370,16 +372,34 @@ async function startSpeedTest() {
   }
 }
 
+function invalidateDiagnostics(changed) {
+  diagnosticRequest?.abort()
+  diagnosticRequest = null
+  busy.diagnostics = false
+  diagnosticReport.value = null
+  reportInvalidated.value = changed
+}
+
 async function runDiagnostics() {
+  if (diagnosticRequest || authStopped) return
+  const request = new AbortController()
+  diagnosticRequest = request
+  diagnosticReport.value = null
+  reportInvalidated.value = false
   busy.diagnostics = true
   error.value = ''
   try {
-    diagnosticReport.value = await api.diagnostics()
-    showNotice('服务端自检已完成')
+    const report = await api.diagnostics(request.signal)
+    if (request.signal.aborted) return
+    diagnosticReport.value = report
+    if (activeTab.value === 'maintenance') showNotice('服务端自检已完成')
   } catch (failure) {
-    if (!isCanceledRequest(failure)) error.value = failure.message
+    if (!request.signal.aborted && !isCanceledRequest(failure)) error.value = failure.message
   } finally {
-    busy.diagnostics = false
+    if (diagnosticRequest === request) {
+      diagnosticRequest = null
+      busy.diagnostics = false
+    }
   }
 }
 
@@ -530,10 +550,10 @@ onBeforeUnmount(() => {
 <template>
   <a class="skip-link" href="#main-content">跳到主要内容</a>
 
-  <main v-if="view === 'loading'" id="main-content" class="boot" tabindex="-1" aria-live="polite">
+  <main v-if="view === 'loading' || view === 'leaving'" id="main-content" class="boot" tabindex="-1" aria-live="polite">
     <img class="boot-logo" src="/logo.png" alt="" />
-    <Spinner label="正在连接控制平面" class="boot-spinner" />
-    <strong>正在连接控制平面</strong>
+    <Spinner :label="view === 'leaving' ? '正在退出登录' : '正在连接控制平面'" class="boot-spinner" />
+    <strong>{{ view === 'leaving' ? '正在退出登录' : '正在连接控制平面' }}</strong>
   </main>
 
   <LoginPage
@@ -575,13 +595,16 @@ onBeforeUnmount(() => {
       <header class="topbar">
         <div class="topbar-context">
           <img src="/logo.png" alt="" />
-          <strong class="topbar-title">{{ currentNavItem.label }}</strong>
+          <h1 class="topbar-title" :aria-label="currentNavItem.title">{{ currentNavItem.label }}</h1>
         </div>
         <div class="topbar-actions">
-          <span class="chip" :class="serviceHealthy ? 'chip-ok' : 'chip-bad'" :title="serviceHealthy ? 'sing-box 服务运行正常' : 'sing-box 服务需要检查'">
+          <span v-if="isOverview && state.status?.sing_box" class="chip overview-service" title="sing-box 服务状态">
+            <i></i><span>{{ serviceHealthy ? 'sing-box 运行中' : `sing-box：${state.status.sing_box}` }}</span>
+          </span>
+          <span v-else-if="!isOverview" class="chip" :class="serviceHealthy ? 'chip-ok' : 'chip-bad'" :title="serviceHealthy ? 'sing-box 服务运行正常' : 'sing-box 服务需要检查'">
             <i></i><span>{{ serviceHealthy ? '在线' : '异常' }}</span>
           </span>
-          <span class="chip" :class="{ 'chip-warn': maintenanceBusy }" :title="maintenanceLabel">
+          <span v-if="!isOverview || maintenanceBusy" class="chip" :class="{ 'chip-warn': maintenanceBusy }" :title="maintenanceLabel">
             <Wrench :size="12" /><span>{{ maintenanceBusy ? '维护中' : '空闲' }}</span>
           </span>
           <ThemeToggle compact />
@@ -594,24 +617,12 @@ onBeforeUnmount(() => {
       <main id="main-content" class="content" tabindex="-1">
         <div class="route-announcement sr-only" aria-live="polite">{{ routeAnnouncement }}</div>
 
-        <header class="page-head">
-          <div class="page-heading">
-            <p class="page-eyebrow">{{ currentNavItem.eyebrow }}</p>
-            <h1>{{ currentNavItem.title }}</h1>
-            <p class="page-description">{{ currentNavItem.description }}</p>
-          </div>
-          <div class="page-meta">
-            <span>控制平面</span>
-            <small class="tnum">{{ panelAddress }}</small>
-          </div>
-        </header>
-
         <Alert v-if="error" variant="destructive" class="page-alert" aria-live="assertive">
           <AlertTriangle />
           <AlertTitle>操作未完成</AlertTitle>
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <Alert v-if="notice" variant="success" class="page-alert" aria-live="polite">
+        <Alert v-if="notice && !isOverview" variant="success" class="page-alert" aria-live="polite">
           <ShieldCheck />
           <AlertTitle>操作已完成</AlertTitle>
           <AlertDescription>{{ notice }}</AlertDescription>
@@ -619,13 +630,19 @@ onBeforeUnmount(() => {
 
         <div class="view" :data-section="activeTab">
           <OverviewView
-            v-if="activeTab === 'overview'"
+            v-if="isOverview"
             :config="state.config"
-            :status="overviewStatus"
-            :racknerd="overviewRackNerd"
-            :healthy="serviceHealthy"
-            :maintenance-busy="maintenanceBusy"
-            @goto="switchTab"
+            :status="state.status || {}"
+            :report="diagnosticReport"
+            :diagnosing="busy.diagnostics"
+            :report-invalidated="reportInvalidated"
+            :subscription-status="api.subscriptionStatus"
+            :manage-subscription="api.manageSubscription"
+            :session="session"
+            :copied="copied === 'subscription' && notice === '订阅地址已复制'"
+            @diagnostics="runDiagnostics"
+            @copied="showNotice('订阅地址已复制', 'subscription')"
+            @revoked="showNotice('订阅地址已撤销')"
           />
           <DashboardView
             v-else-if="activeTab === 'traffic'"
@@ -647,7 +664,7 @@ onBeforeUnmount(() => {
             :meta="state.node_meta"
             :saving="busy.nodes"
             :dirty="nodeDraft.dirty.value"
-            :conflict="nodeDraftConflict.value"
+            :conflict="nodeDraftConflict"
             :copied="copied"
             @save="saveNodes"
             @copy="copyLink"
@@ -913,6 +930,7 @@ onBeforeUnmount(() => {
 }
 
 .topbar-title {
+  margin: 0;
   color: var(--muted-foreground);
   font-size: 0.76rem;
   font-weight: 620;
@@ -995,64 +1013,6 @@ onBeforeUnmount(() => {
   padding: 2rem 1.6rem 3rem;
 }
 
-.page-head {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1.5rem;
-  margin-bottom: 1.55rem;
-}
-
-.page-heading {
-  min-width: 0;
-}
-
-.page-eyebrow {
-  margin: 0 0 0.35rem;
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
-  font-weight: 650;
-  letter-spacing: 0.13em;
-}
-
-.page-head h1 {
-  margin: 0;
-  font-size: clamp(1.65rem, 3vw, 2rem);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 1.05;
-}
-
-.page-description {
-  margin: 0.42rem 0 0;
-  color: var(--muted-foreground);
-  font-size: 0.76rem;
-}
-
-.page-meta {
-  display: grid;
-  justify-items: end;
-  gap: 0.28rem;
-  min-width: 0;
-  color: var(--muted-foreground);
-}
-
-.page-meta > span {
-  font-size: 0.62rem;
-  font-weight: 620;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.page-meta small {
-  max-width: 20rem;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 0.66rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .page-alert {
   margin-bottom: 0.9rem;
 }
@@ -1109,20 +1069,6 @@ onBeforeUnmount(() => {
     padding: 1.5rem 0.9rem calc(5.2rem + env(safe-area-inset-bottom));
   }
 
-  .page-head {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.5rem;
-  }
-
-  .page-meta {
-    justify-items: start;
-  }
-
-  .page-meta small {
-    max-width: 100%;
-  }
-
   .tabbar {
     position: fixed;
     z-index: 40;
@@ -1168,16 +1114,12 @@ onBeforeUnmount(() => {
     padding-inline: 0.8rem;
   }
 
-  .page-head {
-    margin-bottom: 1.25rem;
-  }
-
-  .page-description {
-    max-width: 28rem;
-  }
-
   .chip span {
     display: none;
+  }
+
+  .overview-service span {
+    display: inline;
   }
 
   .chip {

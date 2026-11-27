@@ -59,6 +59,7 @@ type upgradeResult struct {
 type UpdateManager struct {
 	mu         sync.Mutex
 	view       UpdateView
+	lastResult upgradeResult
 	dir        string
 	httpClient *http.Client
 	apiURL     string
@@ -229,14 +230,18 @@ func (m *UpdateManager) restoreResultLocked() {
 	if m.view.OperationID != "" && result.ID != m.view.OperationID {
 		return
 	}
+	if result == m.lastResult {
+		return
+	}
+	m.lastResult = result
 	m.view.OperationID = result.ID
 	m.view.Status = result.Status
 	m.view.Phase = result.Phase
 	m.view.Message = result.Message
 	m.view.Updating = result.Status == "running"
 	if result.Status == "succeeded" {
-		m.view.CurrentVersion = result.TargetVersion
-		m.view.Available = false
+		// The result describes one finished operation, not the running binary
+		// or the availability of a later release.
 		m.view.Error = ""
 	} else if result.Status != "running" {
 		m.view.Error = result.Message

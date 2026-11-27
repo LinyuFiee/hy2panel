@@ -122,7 +122,7 @@ func runRender(args []string) error {
 	if *output == "" {
 		return errors.New("render 需要 output")
 	}
-	cfg, err := store.New(*path).Load()
+	cfg, setOwner, err := loadRenderConfig(*path, *output)
 	if err != nil {
 		return err
 	}
@@ -132,6 +132,15 @@ func runRender(args []string) error {
 	}
 	data = append(data, '\n')
 	dir := filepath.Dir(*output)
+	if setOwner != nil {
+		// Once chowned, the panel owns the inode. Keep its temporary name
+		// private until the fully prepared file is renamed into place.
+		dir, err = os.MkdirTemp(dir, ".render-*")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(dir)
+	}
 	temp, err := os.CreateTemp(dir, ".sing-box-*.tmp")
 	if err != nil {
 		return err
@@ -145,6 +154,12 @@ func runRender(args []string) error {
 	if _, err := temp.Write(data); err != nil {
 		temp.Close()
 		return err
+	}
+	if setOwner != nil {
+		if err := setOwner(temp); err != nil {
+			temp.Close()
+			return err
+		}
 	}
 	if err := temp.Sync(); err != nil {
 		temp.Close()

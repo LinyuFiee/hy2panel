@@ -82,6 +82,7 @@ jobs:
         run: go vet ./...
 
       - name: Build Linux amd64 binary
+        id: panel
         env:
           CGO_ENABLED: 0
         run: |
@@ -90,6 +91,42 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o dist/hy2panel-linux-amd64 ./cmd/hy2panel
           SOURCE_VERSION="$(sed -nE 's/^[[:space:]]*var[[:space:]]+Version[[:space:]]*=[[:space:]]*"([^"]+)"[[:space:]]*$/\1/p' internal/version/version.go)"
           ./dist/hy2panel-linux-amd64 version --json | jq -e --arg version "${SOURCE_VERSION}" '.version == $version' >/dev/null
+          printf 'version=%s\n' "$SOURCE_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Gate v0.8.0 to v0.9.0 upgrade and rollback on Debian 12
+        if: steps.panel.outputs.version == '0.9.0' # The public guarded bridge is specific to this pair.
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+          mkdir -p "$work/download" "$work/source" "$work/image/"{base,candidate}
+          # The guard identifies the *published* v0.8.0 binary, not a source rebuild.
+          # Full history above makes the pinned source object available on tag builds too.
+          git archive 1d2aea45aaf582343da7b197936f24dc09daca25 scripts systemd packaging | tar -x -C "$work/source"
+          bundle=hy2panel-bundle-linux-amd64.tar.gz
+          curl --fail --location --proto '=https' --proto-redir '=https' --max-time 180 --retry 2 \
+            "https://github.com/LinyuFiee/hy2panel/releases/download/v0.8.0/$bundle" -o "$work/download/$bundle"
+          (cd "$work/download" && printf '%s  %s\n' 60adf54d84a6a0a8b898bbfa5d1b763ee3120ed87d9b2fbc1337a6b4f6c422fc "$bundle" | sha256sum -c -)
+          tar -xzf "$work/download/$bundle" -C "$work/image/base" --no-same-owner
+          (cd "$work/image/base" && for f in scripts/{hy2,*.sh,*.conf,lib/*.sh} packaging/* systemd/*; do cmp "$f" "$work/source/$f"; done)
+
+          # Copy only release inputs and fixtures; no checkout, credentials or host mounts.
+          tar -cf - dist/hy2panel-linux-amd64 scripts/{hy2,hy2panel-*.sh,install.sh,cert-deploy.sh,99-hy2panel.conf,lib} packaging systemd |
+            tar -xf - -C "$work/image/candidate"
+          cp scripts/upgrade-from-v080.sh scripts/tests/upgrade-compat*.sh "$work/image/"
+          docker build -t hy2panel-upgrade-gate -f - "$work/image" <<'DOCKERFILE'
+          FROM debian:12-slim
+          RUN apt-get update && apt-get install -y --no-install-recommends jq passwd util-linux && rm -rf /var/lib/apt/lists/*
+          WORKDIR /opt/gate
+          COPY . .
+          ENTRYPOINT ["/bin/bash", "/opt/gate/upgrade-compat.sh"]
+          DOCKERFILE
+          for scenario in bare-forward success rollback recovery; do
+            docker run --rm --network=none --security-opt=no-new-privileges --cap-drop=ALL \
+              --cap-add=CHOWN --cap-add=DAC_OVERRIDE --cap-add=FOWNER --cap-add=SETUID --cap-add=SETGID \
+              --env GITHUB_ACTIONS hy2panel-upgrade-gate "$scenario"
+          done
 
       - name: Check formatting and generated changes
         run: |
@@ -205,6 +242,17 @@ jobs:
       SING_BOX_SIZE: ${{ matrix.size }}
       SING_BOX_SHA256: ${{ matrix.sha256 }}
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
       - name: Download and verify allowlisted asset
         id: binary
         shell: bash
@@ -236,6 +284,13 @@ jobs:
           reported="$(sed -nE 's/^sing-box version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' <<<"${version_output}" | head -n 1)"
           [[ ${reported} == "${SING_BOX_VERSION}" ]]
           printf 'binary=%s\n' "${binary}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check generated mobile client profiles with the allowlisted binary
+        env:
+          SING_BOX_BINARY: ${{ steps.binary.outputs.binary }}
+        run: |
+          test -x "${SING_BOX_BINARY}"
+          go test -count=1 -v -run '^TestSingBoxClientProfile$' ./internal/config
 
       - name: Check Reality-only, Hysteria2-only, and dual configs
         shell: bash

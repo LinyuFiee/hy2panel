@@ -1,926 +1,222 @@
 <script setup>
-import { computed } from 'vue'
-import {
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  ChevronRight,
-  Cpu,
-  Gauge,
-  HardDrive,
-  MemoryStick
-} from '@lucide/vue'
-import HairlineFigure from './HairlineFigure.vue'
-import NodeFlowFigure from './NodeFlowFigure.vue'
-import { formatBytes, formatRate, formatUptime, percent, sumBytes } from '../utils'
+import { computed, ref } from 'vue'
+import { useDocumentVisibility, useElementVisibility, usePreferredReducedMotion } from '@vueuse/core'
+import { Clock3, Cpu, HardDrive, MemoryStick, Monitor, Pause, Play, Server, Stethoscope } from '@lucide/vue'
+import { Button } from './ui/button'
+import OverviewSubscription from './OverviewSubscription.vue'
+import { formatBytes, formatTimestamp, formatUptime } from '../utils'
 
 const props = defineProps({
-  config: { type: Object, default: null },
+  config: { type: Object, required: true },
   status: { type: Object, default: () => ({}) },
-  racknerd: { type: Object, default: () => ({ configured: false }) },
-  healthy: { type: Boolean, default: false },
-  maintenanceBusy: { type: Boolean, default: false }
+  report: { type: Object, default: null },
+  diagnosing: Boolean,
+  reportInvalidated: Boolean,
+  subscriptionStatus: { type: Function, required: true },
+  manageSubscription: { type: Function, required: true },
+  session: { type: Object, required: true },
+  copied: Boolean
 })
+const emit = defineEmits(['diagnostics', 'copied', 'revoked'])
 
-const emit = defineEmits(['goto'])
-
-const cpuPercent = computed(() => Math.min(100, Math.max(0, Number(props.status.cpu_percent || 0))))
-const memPercent = computed(() => percent(props.status.memory_used_mb, props.status.memory_total_mb))
-const diskPercent = computed(() => percent(props.status.disk_used_bytes, props.status.disk_total_bytes))
-const totalRate = computed(() => formatRate(sumBytes(props.status.rx_bytes_per_second, props.status.tx_bytes_per_second)))
-const rackInfo = computed(() => props.racknerd?.info || null)
-const realityEnabled = computed(() => Boolean(props.config?.reality?.enabled))
-const hysteriaEnabled = computed(() => Boolean(props.config?.hysteria2?.enabled))
-const serviceLabel = computed(() => props.healthy ? 'sing-box 服务正常' : 'sing-box 服务异常')
-const maintenanceLabel = computed(() => props.maintenanceBusy ? '维护任务运行中' : '维护队列空闲')
-const panelLabel = computed(() => props.config?.panel?.domain || '当前管理会话')
-
-function barClass(value) {
-  if (value >= 90) return 'bar-bad'
-  if (value >= 70) return 'bar-warn'
-  return 'bar-ok'
+function endpoint(host, port) {
+  if (!host || !port) return '未设置接入地址'
+  return `${host.includes(':') && !host.startsWith('[') ? `[${host}]` : host}:${port}`
 }
+const protocols = computed(() => [
+  { name: 'Reality', transport: 'TCP', enabled: props.config.reality?.enabled, address: endpoint(props.config.panel?.public_host, props.config.reality?.port) },
+  { name: 'Hysteria2', transport: 'UDP', enabled: props.config.hysteria2?.enabled, address: endpoint(props.config.hysteria2?.domain, props.config.hysteria2?.port) }
+])
+const protocolList = ref(null)
+const paused = ref(false)
+const visible = useElementVisibility(protocolList)
+const pageVisibility = useDocumentVisibility()
+const motionPreference = usePreferredReducedMotion()
+const canAnimate = computed(() => protocols.value.some(protocol => protocol.enabled) && motionPreference.value !== 'reduce')
+const playing = computed(() => canAnimate.value && !paused.value && visible.value && pageVisibility.value === 'visible')
+const tracks = [
+  { direction: 'outgoing', path: 'M22 12h5c6 0 6-5 12-5h66c6 0 6 5 12 5h5' },
+  { direction: 'incoming', path: 'M122 12h-5c-6 0-6 5-12 5H39c-6 0-6-5-12-5h-5' }
+]
+const checkNames = { config: 'sing-box 配置', service: '核心服务', 'hy2-listen': 'Hysteria2 监听', certificate: '节点证书', dns: '域名解析' }
+const statusLabels = { pass: '通过', warn: '提醒', fail: '失败', info: '提示' }
+const checks = computed(() => Object.entries(checkNames).map(([id, name]) =>
+  props.report?.checks?.find(check => check.id === id) ?? { id, name, message: '本次自检未返回此项。' }
+))
+function usage(used, total, multiplier = 1) {
+  if (used == null || !(Number(total) > 0)) return '—'
+  return `${formatBytes(Number(used) * multiplier)} / ${formatBytes(Number(total) * multiplier)}`
+}
+function share(used, total) {
+  if (used == null || !Number.isFinite(Number(used)) || !(Number(total) > 0)) return null
+  return Math.max(0, Math.min(100, Number(used) / Number(total) * 100))
+}
+const resources = computed(() => {
+  const s = props.status
+  const cpu = Number.isFinite(s.cpu_percent) ? s.cpu_percent : null
+  return [
+    { name: 'CPU 使用率', icon: Cpu, value: cpu === null ? '—' : `${cpu.toFixed(1)}%`, percent: cpu === null ? null : share(cpu, 100) },
+    { name: '内存', icon: MemoryStick, value: usage(s.memory_used_mb, s.memory_total_mb, 1024 * 1024), percent: share(s.memory_used_mb, s.memory_total_mb) },
+    { name: '磁盘', icon: HardDrive, value: usage(s.disk_used_bytes, s.disk_total_bytes), percent: share(s.disk_used_bytes, s.disk_total_bytes) }
+  ]
+})
 </script>
 
 <template>
   <div class="overview">
-    <section class="relay-hero" aria-labelledby="relay-heading">
-      <div class="relay-copy">
-        <span class="section-index">RELAY / 01</span>
-        <div class="relay-title-row">
-          <div>
-            <h2 id="relay-heading">单节点转发面板</h2>
-            <p>集中查看服务状态、维护占用与面板入口，再进入协议和流量分区处理具体事务。</p>
-          </div>
-          <span class="service-state" :class="healthy ? 'is-ok' : 'is-bad'">
-            <i aria-hidden="true"></i>{{ healthy ? '服务正常' : '服务异常' }}
-          </span>
+    <div class="connection-column">
+      <section class="connection-sheet" aria-labelledby="connect-heading">
+        <div class="access">
+          <h2 id="connect-heading">连接到节点</h2>
+          <OverviewSubscription
+            :subscription-status="subscriptionStatus" :manage-subscription="manageSubscription" :session="session"
+            :has-protocol="protocols.some(protocol => protocol.enabled)" :copied="copied"
+            @copied="emit('copied')" @revoked="emit('revoked')"
+          >
+            <Button type="button" variant="outline" :disabled="diagnosing || !config.hysteria2?.enabled" @click="emit('diagnostics')">
+              <Stethoscope aria-hidden="true" />{{ diagnosing ? '正在诊断…' : '诊断 HY2' }}
+            </Button>
+          </OverviewSubscription>
         </div>
-
-        <dl class="relay-context">
-          <div>
-            <dt>服务</dt>
-            <dd><span class="context-dot" :class="healthy ? 'ok' : 'bad'" aria-hidden="true"></span>{{ serviceLabel }}</dd>
-          </div>
-          <div>
-            <dt>维护</dt>
-            <dd><span class="context-dot" :class="maintenanceBusy ? 'warn' : 'ok'" aria-hidden="true"></span>{{ maintenanceLabel }}</dd>
-          </div>
-          <div>
-            <dt>面板</dt>
-            <dd class="tnum">{{ panelLabel }}</dd>
-          </div>
-          <div>
-            <dt>运行时间</dt>
-            <dd class="tnum">{{ formatUptime(status.uptime_seconds) }}</dd>
-          </div>
-        </dl>
-
-        <p class="schematic-note">
-          <span aria-hidden="true">FIG. 01</span>
-          交互式转发示意，不是实时遥测；移动指针可查看中继路径的逐级响应。
-        </p>
-      </div>
-
-      <figure class="relay-figure">
-        <div class="figure-rail" aria-hidden="true">
-          <span>RELAY SCHEMATIC</span>
-          <span>INTERACTIVE / NOT LIVE</span>
-        </div>
-        <div class="figure-surface">
-          <HairlineFigure
-            class="relay-drawing"
-            figure="relay"
-            name="relay"
-            play
-            :intensity="0.52"
-            theme="auto"
-            label="交互式中继路径示意：移动指针可查看节点之间逐级点亮的转发路径；此图不是实时遥测"
-          />
-        </div>
-        <figcaption>交互式中继结构示意 · 非实时遥测</figcaption>
-      </figure>
-    </section>
-
-    <section class="stat-section" aria-labelledby="resource-heading">
-      <header class="section-heading">
-        <div>
-          <span class="section-index">HOST / 02</span>
-          <h2 id="resource-heading">资源状态</h2>
-        </div>
-        <span class="section-meta">CURRENT SAMPLE</span>
-      </header>
-
-      <div class="stat-grid">
-        <article class="stat">
-          <div class="stat-head"><Cpu :size="15" /><span>CPU 使用率</span><em>01</em></div>
-          <strong class="stat-value tnum">{{ cpuPercent.toFixed(1) }}%</strong>
-          <div class="track" :class="barClass(cpuPercent)" role="meter" aria-label="CPU 使用率" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="cpuPercent"><i :style="{ width: `${cpuPercent}%` }"></i></div>
-          <small class="stat-sub tnum">负载 {{ status.load_average || '—' }}</small>
-        </article>
-
-        <article class="stat">
-          <div class="stat-head"><MemoryStick :size="15" /><span>内存</span><em>02</em></div>
-          <strong class="stat-value tnum">{{ formatBytes(Number(status.memory_used_mb || 0) * 1024 * 1024) }}</strong>
-          <div class="track" :class="barClass(memPercent)" role="meter" aria-label="内存使用率" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="memPercent"><i :style="{ width: `${memPercent}%` }"></i></div>
-          <small class="stat-sub tnum">共 {{ formatBytes(Number(status.memory_total_mb || 0) * 1024 * 1024) }} · {{ memPercent.toFixed(0) }}%</small>
-        </article>
-
-        <article class="stat">
-          <div class="stat-head"><HardDrive :size="15" /><span>磁盘</span><em>03</em></div>
-          <strong class="stat-value tnum">{{ formatBytes(status.disk_used_bytes) }}</strong>
-          <div class="track" :class="barClass(diskPercent)" role="meter" aria-label="磁盘使用率" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="diskPercent"><i :style="{ width: `${diskPercent}%` }"></i></div>
-          <small class="stat-sub tnum">共 {{ formatBytes(status.disk_total_bytes) }} · {{ diskPercent.toFixed(0) }}%</small>
-        </article>
-
-        <article class="stat">
-          <div class="stat-head"><Gauge :size="15" /><span>主机实时速率</span><em>04</em></div>
-          <strong class="stat-value tnum">{{ totalRate }}</strong>
-          <div class="rate-pair tnum">
-            <small><ArrowDownToLine :size="12" />{{ formatRate(status.rx_bytes_per_second) }}</small>
-            <small><ArrowUpFromLine :size="12" />{{ formatRate(status.tx_bytes_per_second) }}</small>
-          </div>
-          <small class="stat-sub">上下行合计</small>
-        </article>
-      </div>
-    </section>
-
-    <section class="protocol-path" aria-labelledby="protocol-path-heading">
-      <header class="protocol-copy">
-        <span class="section-index">PROTOCOL PATH / 03</span>
-        <h2 id="protocol-path-heading">协议路径</h2>
-        <p>项目内置拓扑用于解释客户端数据进入 sing-box 后如何分配到 Reality、Hysteria2 与普通转发路径。</p>
-        <span class="protocol-disclaimer">交互式协议示意 · 不代表当前连接或实时流量</span>
-      </header>
-      <div class="protocol-figure">
-        <NodeFlowFigure
-          play
-          :intensity="0.55"
-          label="交互式协议路径示意：手机客户端数据进入云服务器 sing-box，并按 Reality、Hysteria2 与普通数据路径转发；此图不是实时遥测"
-        />
-      </div>
-    </section>
-
-    <section class="group-section" aria-labelledby="operations-heading">
-      <header class="section-heading">
-        <div>
-          <span class="section-index">OPERATIONS / 04</span>
-          <h2 id="operations-heading">服务入口</h2>
-        </div>
-        <span class="section-meta">3 SECTIONS</span>
-      </header>
-
-      <div class="group-grid">
-        <div class="group">
-          <h3>节点协议</h3>
-          <div class="group-card">
-            <div class="row">
-              <span class="dot" :class="realityEnabled ? 'ok' : 'off'"></span>
-              <div class="row-main">
-                <strong>Reality</strong>
-                <small class="tnum">TCP · {{ config?.reality?.port || '—' }}</small>
-              </div>
-              <em>{{ realityEnabled ? '在线' : '停用' }}</em>
+        <div class="protocols">
+          <header class="protocol-head">
+            <h3 id="protocol-heading">节点协议</h3>
+            <div class="flow-key">
+              <span>设备连接未测试</span>
+              <button v-if="canAnimate" type="button" class="flow-toggle" :aria-label="paused ? '播放传输示意' : '暂停传输示意'" :title="paused ? '播放传输示意（非实时流量）' : '暂停传输示意（非实时流量）'" @click="paused = !paused">
+                <component :is="paused ? Play : Pause" :size="13" aria-hidden="true" />传输示意
+              </button>
+              <span v-else class="flow-label">传输示意</span>
             </div>
-            <div class="row">
-              <span class="dot" :class="hysteriaEnabled ? 'ok' : 'off'"></span>
-              <div class="row-main">
-                <strong>Hysteria2</strong>
-                <small class="tnum">UDP · {{ config?.hysteria2?.port || '—' }}</small>
-              </div>
-              <em>{{ hysteriaEnabled ? '在线' : '停用' }}</em>
-            </div>
-            <button class="row row-action" type="button" @click="emit('goto', 'nodes')">
-              <span class="row-main"><strong>管理节点</strong><small>协议与客户端凭据</small></span>
-              <ChevronRight :size="15" />
-            </button>
-          </div>
+          </header>
+          <ul ref="protocolList" class="protocol-list" :class="{ 'is-playing': playing }" aria-labelledby="protocol-heading">
+            <li v-for="protocol in protocols" :key="protocol.name" :class="{ inactive: !protocol.enabled }">
+              <div class="protocol-id"><strong>{{ protocol.name }}</strong><span class="transport">{{ protocol.transport }}</span><span class="endpoint">{{ protocol.address }}</span></div>
+              <svg class="packet-flow" :class="{ 'is-disabled': !protocol.enabled }" viewBox="0 0 144 24" aria-hidden="true" focusable="false">
+                <Monitor x="1" y="3" :size="18" :stroke-width="1.5" />
+                <Server x="125" y="3" :size="18" :stroke-width="1.5" />
+                <g v-for="track in tracks" :key="track.direction">
+                  <path class="wire" :d="track.path" />
+                  <path v-if="protocol.enabled" class="packet" :class="track.direction" :d="track.path" pathLength="1" />
+                </g>
+              </svg>
+              <span class="config-state">{{ protocol.enabled ? '已配置' : '已停用' }}</span>
+            </li>
+          </ul>
         </div>
+      </section>
 
-        <div class="group">
-          <h3>套餐流量</h3>
-          <div class="group-card">
-            <div class="row quota-row">
-              <div class="row-main">
-                <strong class="tnum">{{ rackInfo ? formatBytes(rackInfo.bandwidth_used) : '未配置' }}</strong>
-                <small class="tnum">
-                  {{ rackInfo ? `本月已用 ${Number(rackInfo.percent_used || 0).toFixed(1)}% · 共 ${formatBytes(rackInfo.bandwidth_total)}` : '在设置中填写 RackNerd API 凭据' }}
-                </small>
-              </div>
-            </div>
-            <div v-if="rackInfo" class="row track-row">
-              <div class="track rack-track" :class="barClass(Number(rackInfo.percent_used || 0))" role="meter" aria-label="本月套餐流量使用率" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="Math.min(Number(rackInfo.percent_used || 0), 100)">
-                <i :style="{ width: `${Math.min(Number(rackInfo.percent_used || 0), 100)}%` }"></i>
-              </div>
-            </div>
-            <button class="row row-action" type="button" @click="emit('goto', 'traffic')">
-              <span class="row-main"><strong>流量分析</strong><small>协议与主机口径</small></span>
-              <ChevronRight :size="15" />
-            </button>
-          </div>
-        </div>
+      <span class="sr-only" role="status">{{ diagnosing ? '正在检查服务器' : report && config.hysteria2?.enabled ? 'HY2 服务端检查已完成，结果见下方。' : '' }}</span>
+      <p v-if="reportInvalidated && config.hysteria2?.enabled" class="diagnostic-note" role="status">节点配置已更改，请重新诊断。</p>
+      <section v-if="report && config.hysteria2?.enabled" class="report" aria-labelledby="report-heading">
+        <header class="report-head">
+          <h2 id="report-heading">HY2 服务端检查</h2>
+          <time :datetime="report.checked_at">检查时间 {{ formatTimestamp(report.checked_at, true) }}</time>
+        </header>
+        <p>仅检查服务器。请在设备上更新订阅，选择 Hysteria2 后测试连接。</p>
+        <ul class="checks">
+          <li v-for="check in checks" :key="check.id">
+            <strong>{{ check.name }}</strong>
+            <div class="check-detail">{{ check.message }}<p v-if="check.suggestion">建议：{{ check.suggestion }}</p></div>
+            <span :class="['check-result', check.status]">{{ statusLabels[check.status] || '未检查' }}</span>
+          </li>
+        </ul>
+      </section>
 
-        <div class="group">
-          <h3>系统</h3>
-          <div class="group-card">
-            <div class="row">
-              <span class="dot" :class="healthy ? 'ok' : 'bad'"></span>
-              <div class="row-main">
-                <strong>{{ healthy ? '服务正常' : '服务异常' }}</strong>
-                <small>{{ maintenanceBusy ? '维护任务运行中' : '无维护任务' }}</small>
-              </div>
-            </div>
-            <div class="row uptime-row">
-              <div class="row-main">
-                <small>主机运行时间</small>
-                <strong class="tnum">{{ formatUptime(status.uptime_seconds) }}</strong>
-              </div>
-            </div>
-            <button class="row row-action" type="button" @click="emit('goto', 'maintenance')">
-              <span class="row-main"><strong>维护中心</strong><small>自检、恢复与日志</small></span>
-              <ChevronRight :size="15" />
-            </button>
-          </div>
+    </div>
+    <section class="resources" aria-labelledby="resource-heading">
+      <h2 id="resource-heading">主机资源</h2>
+      <dl class="readings">
+        <div v-for="metric in resources" :key="metric.name" class="reading">
+          <dt><component :is="metric.icon" :size="15" aria-hidden="true" />{{ metric.name }}</dt>
+          <dd>
+            {{ metric.value }}
+            <span v-if="metric.percent !== null" class="gauge" aria-hidden="true"><i :style="{ width: `${metric.percent}%` }"></i></span>
+          </dd>
         </div>
-      </div>
+        <div class="reading uptime"><dt><Clock3 :size="15" aria-hidden="true" />运行时间</dt><dd>{{ status.uptime_seconds != null ? formatUptime(status.uptime_seconds) : '—' }}</dd></div>
+      </dl>
     </section>
   </div>
 </template>
 
 <style scoped>
-.overview {
-  display: grid;
-  gap: 1.35rem;
-  width: 100%;
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.relay-hero,
-.protocol-path {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 0.85rem;
-  background: var(--card);
-}
-
-.relay-hero {
-  display: grid;
-  grid-template-columns: minmax(18rem, 0.88fr) minmax(22rem, 1.12fr);
-}
-
-.relay-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: clamp(1.25rem, 2.4vw, 2rem);
-  border-right: 1px solid var(--border);
-}
-
-.section-index,
-.section-meta,
-.figure-rail,
-.protocol-disclaimer,
-.schematic-note > span {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  letter-spacing: 0.1em;
-}
-
-.section-index {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  color: var(--muted-foreground);
-  font-size: 0.58rem;
-  font-weight: 650;
-}
-
-.section-index::before {
-  width: 1.35rem;
-  height: 1px;
-  content: '';
-  background: currentColor;
-  opacity: 0.7;
-}
-
-.relay-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: 0.9rem;
-}
-
-.relay-title-row h2,
-.protocol-copy h2,
-.section-heading h2 {
-  margin: 0;
-  color: var(--foreground);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-}
-
-.relay-title-row h2 {
-  font-size: clamp(1.55rem, 2.5vw, 2.15rem);
-}
-
-.relay-title-row p {
-  max-width: 31rem;
-  margin: 0.55rem 0 0;
-  color: var(--muted-foreground);
-  font-size: 0.76rem;
-  line-height: 1.65;
-}
-
-.service-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.38rem;
-  flex: 0 0 auto;
-  padding: 0.35rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted-foreground);
-  font-size: 0.65rem;
-  white-space: nowrap;
-}
-
-.service-state i {
-  width: 0.38rem;
-  height: 0.38rem;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.service-state.is-ok {
-  border-color: color-mix(in srgb, var(--success) 28%, var(--border));
-  color: var(--success);
-}
-
-.service-state.is-bad {
-  border-color: color-mix(in srgb, var(--destructive) 28%, var(--border));
-  color: var(--destructive);
-}
-
-.relay-context {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: auto 0 1.1rem;
-  padding: 1.1rem 0 0;
-}
-
-.relay-context > div {
-  min-width: 0;
-  padding: 0.72rem 0.8rem;
-  border-top: 1px solid var(--border);
-}
-
-.relay-context > div:nth-child(odd) {
-  padding-left: 0;
-  border-right: 1px solid var(--border);
-}
-
-.relay-context dt {
-  margin-bottom: 0.3rem;
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
-}
-
-.relay-context dd {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.42rem;
-  margin: 0;
-  color: var(--foreground);
-  font-size: 0.72rem;
-  font-weight: 580;
-  overflow-wrap: anywhere;
-}
-
-.context-dot {
-  width: 0.38rem;
-  height: 0.38rem;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-}
-
-.context-dot.ok {
-  background: var(--success);
-}
-
-.context-dot.warn {
-  background: var(--warning);
-}
-
-.context-dot.bad {
-  background: var(--destructive);
-}
-
-.schematic-note {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.7rem;
-  margin: 0;
-  padding-top: 0.9rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 0.66rem;
-  line-height: 1.55;
-}
-
-.schematic-note > span {
-  color: var(--foreground);
-  font-size: 0.55rem;
-  white-space: nowrap;
-}
-
-.relay-figure {
-  min-width: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  margin: 0;
-  background: var(--background);
-  --hairline-plate: var(--background);
-}
-
-.figure-rail {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  min-height: 2.2rem;
-  padding: 0.55rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 0.52rem;
-}
-
-.figure-surface {
-  min-width: 0;
-  display: grid;
-  place-items: center;
-  padding: 0.25rem;
-}
-
-.relay-drawing {
-  display: block;
-  width: min(100%, 34rem);
-  min-width: 0;
-}
-
-.relay-figure figcaption {
-  padding: 0.62rem 0.75rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 0.62rem;
-}
-
-.stat-section,
-.group-section {
-  min-width: 0;
-  display: grid;
-  gap: 0.65rem;
-}
-
-.section-heading {
-  min-width: 0;
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-inline: 0.15rem;
-}
-
-.section-heading h2 {
-  margin-top: 0.3rem;
-  font-size: 1.05rem;
-  letter-spacing: -0.02em;
-}
-
-.section-meta {
-  color: var(--muted-foreground);
-  font-size: 0.52rem;
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 0.8rem;
-  background: var(--card);
-}
-
-.stat {
-  min-width: 0;
-  display: grid;
-  align-content: start;
-  gap: 0.45rem;
-  padding: 1rem;
-}
-
-.stat + .stat {
-  border-left: 1px solid var(--border);
-}
-
-.stat-head {
-  min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.42rem;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-  font-weight: 520;
-}
-
-.stat-head svg {
-  color: var(--foreground);
-}
-
-.stat-head em {
-  color: var(--muted-foreground);
-  font: 0.55rem/1 ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-style: normal;
-}
-
-.stat-value {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--foreground);
-  font-size: clamp(1.15rem, 2vw, 1.4rem);
-  font-weight: 650;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.track {
-  height: 2px;
-  overflow: hidden;
-  background: var(--secondary);
-}
-
-.track i {
-  display: block;
-  height: 100%;
-  background: var(--foreground);
-}
-
-.bar-ok i {
-  background: var(--foreground);
-}
-
-.bar-warn i {
-  background: var(--warning);
-}
-
-.bar-bad i {
-  background: var(--destructive);
-}
-
-.stat-sub,
-.rate-pair small {
-  color: var(--muted-foreground);
-  font-size: 0.65rem;
-}
-
-.rate-pair {
-  min-width: 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 0.4rem;
-}
-
-.rate-pair small {
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.22rem;
-  white-space: nowrap;
-}
-
-.protocol-path {
-  display: grid;
-  grid-template-columns: minmax(15rem, 0.36fr) minmax(0, 1fr);
-}
-
-.protocol-copy {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 1.2rem;
-  border-right: 1px solid var(--border);
-}
-
-.protocol-copy h2 {
-  margin-top: 0.65rem;
-  font-size: 1.2rem;
-}
-
-.protocol-copy p {
-  margin: 0.55rem 0 1rem;
-  color: var(--muted-foreground);
-  font-size: 0.7rem;
-  line-height: 1.65;
-}
-
-.protocol-disclaimer {
-  margin-top: auto;
-  padding-top: 0.85rem;
-  border-top: 1px solid var(--border);
-  color: var(--muted-foreground);
-  font-size: 0.53rem;
-  line-height: 1.55;
-}
-
-.protocol-figure {
-  min-width: 0;
-  display: grid;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  background: var(--card);
-}
-
-.protocol-figure :deep(.node-flow) {
-  min-width: 0;
-}
-
-.group-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  align-items: start;
-}
-
-.group {
-  min-width: 0;
-}
-
-.group h3 {
-  margin: 0 0 0.4rem 0.2rem;
-  color: var(--muted-foreground);
-  font-size: 0.68rem;
-  font-weight: 620;
-  letter-spacing: 0.015em;
-}
-
-.group-card {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
-  background: var(--card);
-}
-
-.row {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin: 0;
-  padding: 0.72rem 0.85rem;
-  border: 0;
-  background: transparent;
-  color: var(--foreground);
-  font: inherit;
-  text-align: left;
-}
-
-.row + .row {
-  border-top: 1px solid var(--border);
-}
-
-.row-main {
-  min-width: 0;
-  flex: 1;
-  display: grid;
-  gap: 0.16rem;
-}
-
-.row-main strong {
-  min-width: 0;
-  color: var(--foreground);
-  font-size: 0.78rem;
-  font-weight: 620;
-  overflow-wrap: anywhere;
-}
-
-.row-main small {
-  min-width: 0;
-  color: var(--muted-foreground);
-  font-size: 0.64rem;
-  line-height: 1.45;
-  overflow-wrap: anywhere;
-}
-
-.row > em {
-  color: var(--muted-foreground);
-  font-size: 0.64rem;
-  font-style: normal;
-  white-space: nowrap;
-}
-
-.row-action {
-  color: var(--muted-foreground);
-}
-
-.row-action svg {
-  flex: 0 0 auto;
-  color: var(--muted-foreground);
-}
-
-.row-action:hover {
-  background: var(--accent);
-}
-
-.row-action:hover .row-main strong {
-  color: var(--primary);
-}
-
-.dot {
-  width: 0.42rem;
-  height: 0.42rem;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--muted-foreground);
-  opacity: 0.45;
-}
-
-.dot.ok {
-  background: var(--success);
-  opacity: 1;
-}
-
-.dot.bad {
-  background: var(--destructive);
-  opacity: 1;
-}
-
-.rack-track {
-  width: 100%;
-}
-
-.track-row {
-  padding-block: 0.65rem;
-}
-
-.uptime-row .row-main {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  gap: 0.55rem;
-}
-
-.uptime-row .row-main strong {
-  text-align: right;
-}
-
+.overview { display: grid; grid-template-columns: minmax(0, 2.35fr) minmax(14rem, 1fr); align-items: start; gap: clamp(1.25rem, 3vw, 3rem); min-width: 0; font-variant-numeric: tabular-nums; }
+.connection-column { display: grid; gap: 1.5rem; min-width: 0; }
+.connection-sheet { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.access, .protocols { padding: 1.5rem; }
+.access { background: color-mix(in srgb, var(--card) 64%, var(--muted)); border-bottom: 1px solid var(--border); }
+.protocols { padding-block: 1.1rem .5rem; }
+h2, h3 { margin: 0; font-size: 1rem; font-weight: 630; line-height: 1.4; }
+.access h2 { font-size: 1.5rem; letter-spacing: -.03em; }
+.protocol-head, .report-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .3rem 1rem; }
+.flow-key, time, .report > p, .diagnostic-note, .check-detail p, dt { color: var(--muted-foreground); font-size: .8125rem; }
+.flow-key, .flow-toggle { display: inline-flex; align-items: center; gap: .4rem; }
+.flow-key { gap: .65rem; }
+.flow-toggle, .flow-label { border-inline-start: 1px solid var(--border); padding-inline-start: .65rem; }
+.flow-toggle { color: inherit; font: inherit; min-height: 1.75rem; }
+.flow-toggle:hover, .flow-toggle:focus-visible { color: var(--foreground); }
+ul { list-style: none; padding: 0; margin: 0; }
+.protocol-list { margin: .65rem 0 0; }
+.checks li { display: grid; grid-template-columns: minmax(6.5rem, .36fr) minmax(0, 1fr) auto; gap: .4rem 1rem; align-items: baseline; }
+li + li { border-top: 1px solid var(--border); }
+.protocol-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(5rem, 9rem) auto; gap: .75rem; align-items: center; padding-block: 1.05rem; }
+.protocol-id { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: .18rem .55rem; }
+.protocol-id .endpoint { flex-basis: 100%; }
+.inactive .protocol-id { color: var(--muted-foreground); }
+.packet-flow { display: block; width: 100%; color: var(--muted-foreground); --packet-color: var(--chart-1); --phase: -.65s; }
+.protocol-list li:nth-child(2) .packet-flow { --packet-color: var(--chart-2); --phase: -1.55s; }
+.packet-flow.is-disabled { opacity: .45; }
+.packet-flow path.wire, .packet-flow path.packet { fill: none; stroke-linecap: round; }
+.wire { stroke: currentColor; stroke-width: 1; opacity: .4; }
+.packet { stroke: var(--packet-color); stroke-width: 2.8; stroke-dasharray: .068 1.02; stroke-dashoffset: -.32; animation: transfer 2.8s linear var(--phase) infinite paused; }
+.packet.incoming { stroke-width: 2; stroke-dashoffset: -.64; animation-delay: calc(var(--phase) - 1.1s); }
+.is-playing .packet { animation-play-state: running; }
+@keyframes transfer { from { stroke-dashoffset: .068; } to { stroke-dashoffset: -1.02; } }
+@media (prefers-reduced-motion: reduce) { .packet-flow .packet { animation: none !important; } }
+.protocol-list strong { font-size: 1rem; font-weight: 620; }
+.endpoint { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .8125rem; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.transport { color: var(--muted-foreground); font-size: .75rem; }
+.config-state, .check-result { font-size: .8125rem; color: var(--muted-foreground); white-space: nowrap; }
+.report > p { margin: .35rem 0 1rem; }
+.checks, .resources dl { border-block: 1px solid var(--border); }
+.checks li { padding-block: .7rem; font-size: .875rem; }
+.checks strong { font-weight: 550; }
+.check-detail { min-width: 0; overflow-wrap: anywhere; }
+.check-detail p { margin: .2rem 0 0; }
+.check-result.warn { color: var(--warning); }
+.check-result.fail { color: var(--destructive); }
+.diagnostic-note { margin: -1rem 0 0; }
+.resources { min-width: 0; padding: 1.5rem 0 0; }
+.readings { margin: .85rem 0 0; }
+.reading { padding: .9rem 0; }
+.reading + .reading { border-top: 1px solid var(--border); }
+.reading dt { display: flex; align-items: center; gap: .55rem; }
+.reading dd { margin: .3rem 0 0; font-size: 1.125rem; line-height: 1.4; font-weight: 560; overflow-wrap: anywhere; }
+.gauge { display: block; height: 3px; background: var(--secondary); margin-top: .65rem; border-radius: 2px; overflow: hidden; }
+.gauge i { display: block; height: 100%; background: var(--muted-foreground); }
+.uptime { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: .35rem .65rem; }
+.uptime dd { margin: 0; font-size: .875rem; }
 @media (max-width: 1080px) {
-  .relay-hero {
-    grid-template-columns: minmax(17rem, 0.8fr) minmax(19rem, 1.2fr);
-  }
-
-  .stat-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .stat:nth-child(3) {
-    border-left: 0;
-  }
-
-  .stat:nth-child(n + 3) {
-    border-top: 1px solid var(--border);
-  }
-
-  .group-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .overview { grid-template-columns: minmax(0, 1fr); gap: 1.75rem; }
+  .resources { padding: 0; }
+  .readings { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.25rem; padding-block: .4rem; }
+  .reading + .reading { border: 0; }
+  .uptime { display: block; }
+  .uptime dd { margin-top: .3rem; }
 }
-
-@media (max-width: 820px) {
-  .relay-hero,
-  .protocol-path {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .relay-copy,
-  .protocol-copy {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .relay-context {
-    margin-top: 1.5rem;
-  }
-
-  .relay-figure {
-    min-height: 20rem;
-  }
-
-  .protocol-copy {
-    display: block;
-  }
-
-  .protocol-disclaimer {
-    display: block;
-    margin-top: 1rem;
-  }
-
-  .group-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 560px) {
-  .overview {
-    gap: 1.1rem;
-  }
-
-  .relay-copy {
-    padding: 1rem;
-  }
-
-  .relay-title-row {
-    display: grid;
-  }
-
-  .service-state {
-    justify-self: start;
-  }
-
-  .relay-context {
-    grid-template-columns: minmax(0, 1fr);
-    margin-top: 1rem;
-  }
-
-  .relay-context > div,
-  .relay-context > div:nth-child(odd) {
-    padding-inline: 0;
-    border-right: 0;
-  }
-
-  .schematic-note {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.35rem;
-  }
-
-  .relay-figure {
-    min-height: 0;
-  }
-
-  .figure-rail span:last-child {
-    display: none;
-  }
-
-  .stat-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .stat + .stat,
-  .stat:nth-child(3),
-  .stat:nth-child(n + 3) {
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-
-  .protocol-copy,
-  .protocol-figure {
-    padding: 1rem;
-  }
-
-  .protocol-figure :deep(.node-flow svg) {
-    min-height: 8rem;
-  }
-
-  .section-meta {
-    display: none;
-  }
-}
-
-@media (max-width: 360px) {
-  .relay-copy,
-  .protocol-copy,
-  .protocol-figure,
-  .stat,
-  .row {
-    padding-inline: 0.8rem;
-  }
-
-  .rate-pair {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .uptime-row .row-main {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .uptime-row .row-main strong {
-    text-align: left;
-  }
+@media (max-width: 680px) {
+  .access, .protocols { padding-inline: 1rem; }
+  .access { padding-block: 1.15rem; }
+  .protocol-list li { grid-template-columns: minmax(0,1fr) auto; gap: .125rem .6rem; padding-block: .85rem; }
+  .protocol-id { grid-row: 1 / 3; }
+  .config-state { grid-column: 2; grid-row: 1; text-align: right; }
+  .packet-flow { grid-column: 2; grid-row: 2; width: 5rem; }
+  .checks li { grid-template-columns: minmax(0,1fr) auto; gap: .25rem .6rem; }
+  .check-result { grid-row: 1; grid-column: 2; }
+  .check-detail { grid-column: 1 / -1; }
+  .readings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.5rem; }
+  .reading:nth-child(n+3) { border-top: 1px solid var(--border); }
+  .flow-toggle { min-height: 2.75rem; }
 }
 </style>

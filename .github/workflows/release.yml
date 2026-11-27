@@ -55,6 +55,10 @@ jobs:
           git fetch --force --no-tags origin "refs/tags/${RELEASE_TAG}"
           tag_commit="$(git rev-parse 'FETCH_HEAD^{commit}')"
           [[ ${tag_commit} == "$(git rev-parse HEAD)" ]]
+          if [[ $RELEASE_TAG == v0.9.0 ]]; then
+            # The helper's provenance must verify against the tag, even on dispatch.
+            [[ $GITHUB_REF == "refs/tags/$RELEASE_TAG" && $(git rev-parse "$GITHUB_SHA^{commit}") == "$tag_commit" ]]
+          fi
           [[ $(git status --short --untracked-files=all) == "" ]]
 
       - name: Set up Node.js
@@ -206,11 +210,41 @@ jobs:
           diff -u "${expected}" "${actual}"
           ! grep -q 'firewall' "${actual}"
 
+      - name: Bind the one-time v0.8.0 handoff to the tested v0.9.0 bundle
+        if: env.RELEASE_TAG == 'v0.9.0'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          template=scripts/upgrade-from-v080.sh
+          helper=release/upgrade-from-v080.sh
+          archive="release/$BUNDLE"
+          # The helper is separate from the bundle (no circular hash). The reused
+          # CI gate exercises this candidate's private handoff and rollback.
+          for member in scripts/hy2panel-upgrade.sh scripts/lib/hy2panel-transaction.sh; do
+            tar -xzOf "$archive" -- "./$member" | cmp - "$member"
+          done
+          grep -Fq -- '--from-v080' scripts/hy2panel-upgrade.sh
+          [[ $(grep -Fo '@BUNDLE_SHA256@' "$template" | wc -l) -eq 1 ]]
+          pin=$(sha256sum "$archive" | cut -d' ' -f1)
+          cmp <(printf '%s  %s\n' "$pin" "$BUNDLE") "$archive.sha256"
+          sed "s/@BUNDLE_SHA256@/$pin/" "$template" > "$helper"
+          grep -Fxq "pin='$pin'" "$helper"
+          chmod 0755 "$helper"
+          bash -n "$helper"
+          bash "$helper" --help
+          if bash "$helper"; then exit 1; fi
+
       - name: Attest release artifacts
         uses: actions/attest-build-provenance@v3
         with:
           subject-path: |
             release/hy2panel-bundle-linux-amd64.tar.gz
+
+      - name: Attest one-time handoff
+        if: env.RELEASE_TAG == 'v0.9.0'
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: release/upgrade-from-v080.sh
 
       - name: Publish GitHub release
         env:
@@ -218,15 +252,14 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          assets=("release/${BUNDLE}" "release/${BUNDLE}.sha256")
+          if [[ $RELEASE_TAG == v0.9.0 ]]; then
+            assets+=(release/upgrade-from-v080.sh)
+          fi
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh release upload "${RELEASE_TAG}" \
-              "release/${BUNDLE}" \
-              "release/${BUNDLE}.sha256" \
-              --clobber
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --clobber
           else
-            gh release create "${RELEASE_TAG}" \
-              "release/${BUNDLE}" \
-              "release/${BUNDLE}.sha256" \
+            gh release create "${RELEASE_TAG}" "${assets[@]}" \
               --verify-tag \
               --title "${RELEASE_TAG}" \
               --generate-notes
